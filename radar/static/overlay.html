@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TS Radar Overlay</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: "Segoe UI", sans-serif;
+            background: rgba(15, 23, 42, 0.92);
+            color: #f1f5f9;
+            padding: 14px 16px;
+            min-height: 100vh;
+        }
+        h1 { font-size: 14px; font-weight: 700; color: #94a3b8; margin-bottom: 10px; }
+        .speed {
+            font-size: 42px;
+            font-weight: 800;
+            line-height: 1;
+            color: #38bdf8;
+        }
+        .speed span { font-size: 18px; font-weight: 600; color: #94a3b8; }
+        .row { margin-top: 10px; font-size: 13px; line-height: 1.45; }
+        .label { color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+        .dispatch {
+            margin-top: 12px;
+            padding: 8px 10px;
+            background: rgba(251, 191, 36, 0.15);
+            border-left: 3px solid #fbbf24;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .convoy { color: #4ade80; }
+        .offline { color: #f87171; }
+    </style>
+</head>
+<body>
+    <h1>TS Multiplayer Radar</h1>
+    <div class="speed" id="speed">– <span>km/h</span></div>
+    <div class="row"><div class="label">Spieler</div><div id="player">–</div></div>
+    <div class="row"><div class="label">Nächster Halt</div><div id="stop">–</div></div>
+    <div class="row"><div class="label">Konvoi</div><div id="convoy" class="convoy">–</div></div>
+    <div class="dispatch" id="dispatch" style="display:none"></div>
+
+    <script>
+        const params = new URLSearchParams(location.search);
+        const player = params.get("player") || "MeinZug";
+        const sessionId = params.get("session") || "";
+        let lastMsgId = 0;
+
+        document.getElementById("player").textContent = player;
+
+        async function tick() {
+            try {
+                const posRes = await fetch("/api/positions");
+                const players = await posRes.json();
+                const me = players.find((p) => p.player === player);
+                if (me) {
+                    document.getElementById("speed").innerHTML =
+                        `${Math.round(me.speed_kph || 0)} <span>km/h</span>`;
+                    document.getElementById("stop").textContent =
+                        me.nearest_stop
+                            ? `${me.nearest_stop} (${me.nearest_stop_km} km)`
+                            : "–";
+                } else {
+                    document.getElementById("speed").innerHTML =
+                        `<span class="offline">offline</span>`;
+                }
+
+                if (sessionId) {
+                    const convoyRes = await fetch(
+                        `/api/sessions/${encodeURIComponent(sessionId)}/convoy?player=${encodeURIComponent(player)}`
+                    );
+                    const convoyData = await convoyRes.json();
+                    const nearest = (convoyData.convoy || [])[0];
+                    document.getElementById("convoy").textContent = nearest
+                        ? `${nearest.player} · ${(nearest.distance_km < 1
+                            ? Math.round(nearest.distance_km * 1000) + " m"
+                            : nearest.distance_km.toFixed(1) + " km")}`
+                        : "allein";
+
+                    const msgRes = await fetch(
+                        `/api/sessions/${encodeURIComponent(sessionId)}/messages?after=${lastMsgId}`
+                    );
+                    const msgData = await msgRes.json();
+                    for (const msg of msgData.messages || []) {
+                        lastMsgId = Math.max(lastMsgId, msg.id);
+                        if (msg.target && msg.target !== player) continue;
+                        const box = document.getElementById("dispatch");
+                        box.style.display = "block";
+                        box.textContent = `${msg.sender}: ${msg.text}`;
+                    }
+                }
+            } catch (e) {
+                console.warn(e);
+            }
+        }
+
+        tick();
+        setInterval(tick, 1500);
+    </script>
+</body>
+</html>

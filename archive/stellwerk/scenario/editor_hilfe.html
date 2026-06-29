@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+body { font-family: Arial, sans-serif; background: #1a2838; color: #eee; margin: 16px; line-height: 1.5; }
+h1 { color: #4fc3f7; font-size: 20px; }
+h2 { color: #ffd54f; font-size: 16px; margin-top: 18px; }
+.k { color: #ffd54f; font-weight: bold; }
+.ok { color: #99ff99; }
+</style>
+</head>
+<body>
+<h1>Stellwerk – nur 3 Schritte im Editor</h1>
+<p>Alles andere ist schon installiert. Du musst nur noch:</p>
+
+<h2>Schritt 1 – Signal in der STRECKE (Strecken-Editor)</h2>
+<p><span class="k">Werkzeuge → Strecken-Editor</span> → Berlin JWD → dein Signal anklicken.</p>
+<p>Rechts <b>zwei</b> Felder eintragen:</p>
+<ul>
+<li><span class="k">Object Name</span> = <span class="ok">SW_S1</span> (hast du schon)</li>
+<li><span class="k">Script</span> = <span class="ok">TS Stellwerk SW_S1.lua</span> <b>← OHNE DAS ÄNDERT SICH NICHTS!</b></li>
+</ul>
+<p>Das Script-Feld steht oft direkt neben der Zahl <span class="k">566</span> oder unter „Script“ / „Lua“.</p>
+<p class="ok"><b>STRECKE SPEICHERN</b> (Strg+S) – nicht nur das Szenario!</p>
+
+<h2>Schritt 2 – Fahrplan (einmalig, wichtig!)</h2>
+<p>Oben <span class="k">Fahrplan</span> → beim <b>Spieler-Dienst</b>:</p>
+<ul>
+<li>Neue Zeile: <span class="k">Warten</span> → <span class="k">1 Sekunde</span></li>
+<li>Feld <span class="k">Ereignis auslösen</span> / <span class="k">Trigger Event</span> = <span class="ok">StellwerkStart</span></li>
+<li><b>Nicht</b> „Success Event“ oder „Bedingung“ – nur <b>Trigger Event</b>!</li>
+</ul>
+<p>Nach dem Start muss oben <span class="ok">„Stellwerk aktiv“</span> erscheinen. Sonst Fahrplan prüfen.</p>
+<p>Einmal <span class="k">stellwerk\patch_fresh_start.bat</span> ausführen, dann Szenario neu starten.</p>
+
+<h2>Schritt 3 – Script kompilieren (nach jedem Update)</h2>
+<p><span class="k">Script</span> → <span class="k">Kompilieren</span> → Strg+S speichern.</p>
+
+<h2>Im Spiel</h2>
+<p>Menü oben rechts: <span class="k">Hp0</span> / <span class="k">Sh1</span> / <span class="k">Hp1</span> anklicken.</p>
+<p>Oder: <span class="k">radar\start_stellwerk_sim.bat</span> → Browser → SW_S1 anklicken.</p>
+<p>Unten rechts muss stehen: <span class="ok">Stellwerk OK (566/SW_S1)</span></p>
+<p>Wenn Meldung kommt aber das Signal gleich bleibt: <b>Script-Feld in Schritt 1 fehlt</b> oder Strecke nicht gespeichert.</p>
+</body>
+</html>

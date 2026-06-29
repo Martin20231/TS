@@ -17,6 +17,7 @@ import time
 
 import requests
 
+from http_session import create_http_session
 from radar_config import CONFIG_PATH, load_config
 
 # Virtuelle Controller-IDs laut offizieller External-Interface-API
@@ -81,6 +82,13 @@ def load_raildriver(dll_path: str) -> ctypes.CDLL:
 
     dll.GetRailSimLocoChanged.restype = ctypes.c_bool
     dll.GetRailSimLocoChanged.argtypes = None
+
+    try:
+        dll.GetLocoName.restype = ctypes.c_char_p
+        dll.GetLocoName.argtypes = None
+        dll._has_loco_name = True  # type: ignore[attr-defined]
+    except AttributeError:
+        dll._has_loco_name = False  # type: ignore[attr-defined]
 
     # --- Verbindungsfunktionen ---
     # In manchen Anleitungen heißt die Verbindungsfunktion „SetRailDriverMode“.
@@ -164,11 +172,21 @@ class LocoTelemetry:
         self.last_time: float | None = None
         self.gps_speed_kph = 0.0
         self.gps_heading = 0.0
+        self.loco_name = ""
 
     def refresh_for_loco(self, dll: ctypes.CDLL) -> None:
         """Sucht das Tachometer neu, wenn die Lok gewechselt wurde."""
         if not dll.GetRailSimLocoChanged() and self.speed_index is not None:
             return
+
+        if getattr(dll, "_has_loco_name", False):
+            try:
+                raw = dll.GetLocoName()
+                if raw:
+                    parts = raw.decode("utf-8", errors="replace").split("::")
+                    self.loco_name = parts[-1] if parts else raw.decode()
+            except (AttributeError, OSError):
+                pass
 
         controllers = get_controller_list(dll)
         self.speed_index = None
@@ -314,6 +332,10 @@ def send_position_to_server(
     lon: float,
     speed_kph: float,
     heading: float,
+    session: requests.Session | None = None,
+    session_id: str = "",
+    role: str = "driver",
+    loco: str = "",
 ) -> bool:
     """
     Sendet Position, Geschwindigkeit und Fahrtrichtung an den Radar-Server.
@@ -333,14 +355,25 @@ def send_position_to_server(
         "speed_kph": speed_kph,
         "heading": heading,
         "timestamp": time.time(),
+        "session_id": session_id or None,
+        "role": role,
+        "loco": loco,
     }
 
+    http = session or requests
     try:
-        response = requests.post(server_url, json=payload, timeout=5)
+        response = http.post(server_url, json=payload, timeout=5)
         response.raise_for_status()
         return True
     except requests.RequestException as error:
-        print(f"Fehler beim Senden an {server_url}: {error}", file=sys.stderr)
+        err = str(error)
+        if "10048" in err:
+            print(
+                "[Radar] Port belegt – stop_radar.bat ausführen, dann nur EINMAL starten.",
+                file=sys.stderr,
+            )
+        else:
+            print(f"Fehler beim Senden an {server_url}: {error}", file=sys.stderr)
         return False
 
 
@@ -362,6 +395,10 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
     server_url = config["server_url"]
     dll_path = config["raildriver_dll_path"]
     poll_interval = float(config.get("poll_interval_seconds", 1.0))
+    session_id = str(config.get("session_id", "") or "").strip()
+    session_role = str(config.get("session_role", "driver") or "driver")
+    dispatch_after_id = 0
+    server_root = server_url.rsplit("/api/", 1)[0] if "/api/" in server_url else server_url.rstrip("/")
 
     def notify(kind: str, message: str) -> None:
         if status_callback:
@@ -378,6 +415,8 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
     log(f"Spieler:       {player_name}")
     log(f"Server:        {server_url}")
     log(f"Intervall:     {poll_interval}s")
+    if session_id:
+        log(f"Session:       {session_id} ({session_role})")
     log("")
     log("Starte Train Simulator und beginne eine Fahrt, falls noch nicht geschehen.")
     log("")
@@ -387,9 +426,13 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
 
     establish_connection(dll)
     telemetry.refresh_for_loco(dll)
+
     log("Verbindung zum Simulator hergestellt. Lese GPS-Daten …")
     notify("sim", "verbunden")
     log("")
+
+    http = create_http_session()
+    server_fail_streak = 0
 
     try:
         while True:
@@ -398,6 +441,7 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
                 break
 
             maintain_connection(dll)
+
             state = read_train_state(dll, telemetry)
 
             if state["lat"] != 0.0 or state["lon"] != 0.0:
@@ -408,7 +452,15 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
                     state["lon"],
                     state["speed_kph"],
                     state["heading"],
+                    session=http,
+                    session_id=session_id,
+                    role=session_role,
+                    loco=telemetry.loco_name,
                 )
+                if ok:
+                    server_fail_streak = 0
+                else:
+                    server_fail_streak += 1
                 notify(
                     "gps",
                     f"{state['speed_kph']:.0f} km/h · {state['heading']:.0f}°"
@@ -418,12 +470,42 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
                 log("[Radar] Noch keine GPS-Daten – bist du in einer aktiven Fahrt?")
                 notify("gps", "warte auf Fahrt …")
 
-            if stop_event and stop_event.wait(poll_interval):
-                log("Tracker beendet.")
-                break
+            if session_id and server_fail_streak < 3:
+                try:
+                    msg_url = f"{server_root}/api/sessions/{session_id}/messages"
+                    msg_resp = http.get(
+                        msg_url,
+                        params={"after": dispatch_after_id},
+                        timeout=3,
+                    )
+                    if msg_resp.ok:
+                        for msg in msg_resp.json().get("messages", []):
+                            dispatch_after_id = max(dispatch_after_id, int(msg["id"]))
+                            target = msg.get("target")
+                            if target and target != player_name:
+                                continue
+                            label = msg.get("sender", "Leitstand")
+                            text = msg.get("text", "")
+                            log(f"[Leitstand] {label}: {text}")
+                            notify("dispatch", f"{label}: {text}")
+                except requests.RequestException:
+                    pass
+
+            wait_seconds = poll_interval
+            if server_fail_streak >= 3:
+                wait_seconds = min(poll_interval * 3, 5.0)
+
+            if stop_event:
+                if stop_event.wait(wait_seconds):
+                    log("Tracker beendet.")
+                    break
+            else:
+                time.sleep(wait_seconds)
 
     except KeyboardInterrupt:
         log("Tracker beendet.")
+    finally:
+        http.close()
 
 
 def main() -> None:

@@ -1,12 +1,8 @@
 {
   "player_name": "DeinName",
-  "server_port": 8080,
-  "server_host": "0.0.0.0",
+  "server_url": "https://ts-multiplayer-radar.onrender.com/api/position",
   "poll_interval_seconds": 1.0,
   "raildriver_dll_path": "E:\\Steam\\steamapps\\common\\RailWorks\\plugins\\RailDriver64.dll",
-  "server_url": "http://127.0.0.1:8080/api/position",
-  "lines_min_zoom": 10,
-  "route_trail_minutes": 30,
   "session_id": "",
   "session_role": "driver",
   "convoy_alert_km": 2.0

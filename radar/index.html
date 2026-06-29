@@ -332,16 +332,109 @@
             color: #eee !important;
             border-color: #00843d !important;
         }
+
+        /* Multiplayer-Tabs */
+        #mp-tabs {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .mp-tab {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 7px 4px;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            background: #f8fafc;
+            cursor: pointer;
+        }
+
+        .mp-tab.active {
+            background: #2563eb;
+            color: #fff;
+            border-color: #1d4ed8;
+        }
+
+        .mp-tab-panel.hidden { display: none; }
+
+        .mp-field {
+            display: block;
+            font-size: 11px;
+            margin: 8px 0;
+            color: #374151;
+        }
+
+        .mp-field input, .mp-field select {
+            display: block;
+            width: 100%;
+            margin-top: 4px;
+            padding: 6px 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+
+        .mp-copy {
+            width: 100%;
+            font-size: 10px;
+            padding: 6px;
+            margin: 6px 0;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .mp-hr { border: none; border-top: 1px solid #e5e7eb; margin: 10px 0; }
+        .mp-member-list, .mp-msg-list { max-height: 100px; overflow-y: auto; margin: 8px 0; font-size: 12px; }
+        .mp-member-row, .mp-convoy-row, .mp-score-row { margin: 4px 0; }
+        .mp-msg { margin: 4px 0; padding: 4px 0; border-bottom: 1px solid #f1f5f9; }
+        .mp-actions, .mp-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+        .mp-quick-btn { font-size: 11px !important; padding: 5px 8px !important; }
+
+        #mp-toast {
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%) translateY(120%);
+            background: #1e293b;
+            color: #fff;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            z-index: 2000;
+            transition: transform 0.25s ease;
+            max-width: 90vw;
+        }
+
+        #mp-toast.visible { transform: translateX(-50%) translateY(0); }
+
+        body.dark-mode .mp-tab { background: #333; border-color: #555; color: #eee; }
+        body.dark-mode .mp-tab.active { background: #3b82f6; }
+        body.dark-mode .mp-field { color: #ddd; }
+        body.dark-mode .mp-field input, body.dark-mode .mp-field select {
+            background: #2a2a2a; color: #eee; border-color: #555;
+        }
+
     </style>
 </head>
 <body>
 
     <!-- Info-Panel -->
     <div id="info-panel">
-        <h1>TS Multiplayer-Radar</h1>
-        <p class="subtitle">Live-Karte für Train Simulator Classic</p>
+        <h1 id="panel-title">TS Multiplayer-Radar</h1>
+        <p class="subtitle" id="panel-subtitle">Live-Karte · Session · Leitstand</p>
+        <p class="status" id="mp-session-status">Keine Session</p>
+        <p class="status" id="mp-convoy-status"></p>
+
+        <div id="mp-tabs">
+            <button type="button" class="mp-tab active" data-tab="map">Karte</button>
+            <button type="button" class="mp-tab" data-tab="session">Session</button>
+            <button type="button" class="mp-tab" data-tab="dispatch">Leitstand</button>
+        </div>
 
         <div class="panel-body">
+            <div class="mp-tab-panel" data-tab="map">
             <div id="status-leds">
                 <span class="led-item"><span class="led warn" id="led-server"></span> Server</span>
                 <span class="led-item"><span class="led" id="led-live"></span> Live</span>
@@ -362,18 +455,29 @@
             <p class="status" id="station-status">Lade S-Bahn-Stationen …</p>
 
             <details class="help-box">
-                <summary>Hilfe &amp; Einrichtung</summary>
+                <summary>Hilfe</summary>
                 <ol>
-                    <li><strong>Lokal:</strong> <code>start_radar.bat</code> · <strong>Cloud:</strong> <code>start_tracker.bat</code></li>
-                    <li>Train Simulator starten und eine <strong>Fahrt beginnen</strong></li>
-                    <li>Namen in <strong>config.json</strong> (<code>player_name</code>)</li>
-                    <li>Freunde: dieselbe <code>server_url</code> wie unten</li>
+                    <li><code>start_radar.bat</code> starten</li>
+                    <li>Tab <strong>Session</strong> → Fahrt erstellen / beitreten</li>
+                    <li><code>session_id</code> in <code>config.json</code> für Tracker</li>
                 </ol>
                 <span class="help-url" id="cfg-friend-url">lädt …</span>
-                <p style="margin-top:6px">Grün <strong>S</strong> = Station · Orange = nächster Halt · Blaue Linie = deine Route</p>
+                <button type="button" class="ctrl-btn" id="mp-btn-overlay" style="margin-top:8px">Overlay öffnen</button>
             </details>
+            </div>
+
+            <div class="mp-tab-panel hidden" data-tab="session">
+                <div id="mp-lobby-body"></div>
+            </div>
+
+            <div class="mp-tab-panel hidden" data-tab="dispatch">
+                <div id="mp-dispatch-body"></div>
+            </div>
+
         </div>
     </div>
+
+    <div id="mp-toast"></div>
 
     <!-- Karten-Container -->
     <div id="map"></div>
@@ -386,6 +490,8 @@
         let localPlayerName = "MeinZug";
         let linesMinZoom = 10;
         let routeTrailMaxPoints = 1800;
+        let stationLayerRef = null;
+        let linesLayerReady = false;
         let trailEnabled = localStorage.getItem("radar-trail") !== "false";
 
         // Farben für andere Spieler (eigener Zug ist immer blau)
@@ -434,6 +540,9 @@
                 const cfg = await response.json();
                 linesMinZoom = cfg.lines_min_zoom ?? 10;
                 routeTrailMaxPoints = (cfg.route_trail_minutes ?? 30) * 60;
+                if (window.MP && cfg.convoy_alert_km) {
+                    window.MP.setConvoyAlertKm(cfg.convoy_alert_km);
+                }
 
                 if (cfg.cloud) {
                     const fromUrl = new URLSearchParams(window.location.search).get("player");
@@ -593,6 +702,7 @@
         document.getElementById("btn-trail").addEventListener("click", () => {
             setTrailEnabled(!trailEnabled);
         });
+
 
         // Beim manuellen Verschieben der Karte Follow deaktivieren
         map.on("dragstart", () => setFollowSelf(false));
@@ -1052,6 +1162,9 @@
 
         /** Wendet Spielerdaten auf die Karte an (REST oder WebSocket) */
         function applyPositionsFromServer(players) {
+            if (typeof window.mpFilterPositions === "function") {
+                players = window.mpFilterPositions(players);
+            }
             const knownNames = new Set();
             let panelNeedsUpdate = false;
 
@@ -1122,7 +1235,7 @@
             } catch (error) {
                 console.warn("REST-Fallback fehlgeschlagen:", error.message);
                 document.getElementById("connection-status").textContent =
-                    "Keine Verbindung zum Server – start_radar.bat ausführen";
+                    "Keine Verbindung – stop_radar.bat, dann start_radar.bat";
                 setLed("led-server", "err");
                 setLed("led-live", "err");
             }
@@ -1134,6 +1247,7 @@
         // WebSocket – sofortige Updates wenn ein Tracker sendet
         if (typeof io !== "undefined") {
             const socket = io();
+            window.socket = socket;
 
             socket.on("connect", () => {
                 socketLive = true;
@@ -1146,25 +1260,27 @@
             socket.on("disconnect", () => {
                 socketLive = false;
                 document.getElementById("connection-status").textContent =
-                    "Getrennt – nutze REST-Fallback";
+                    "Kurz getrennt – verbinde neu …";
                 setLed("led-live", "warn");
+                fetchPositionsFromServer();
             });
 
             socket.on("positions_update", (players) => {
                 applyPositionsFromServer(players);
             });
+
         } else {
             document.getElementById("connection-status").textContent =
                 "REST-Modus (WebSocket-Skript fehlt)";
             setLed("led-live", "warn");
         }
 
-        // REST-Fallback alle 10 s falls WebSocket ausfällt
+        // REST-Fallback alle 3 s falls WebSocket ausfällt
         setInterval(() => {
             if (!socketLive) {
                 fetchPositionsFromServer();
             }
-        }, 10000);
+        }, 3000);
 
         // ===================================================================
         // S-Bahn-Linien (Phase 3 – Streckenverlauf aus OpenStreetMap)
@@ -1252,6 +1368,7 @@
                         requestAnimationFrame(drawLineBatch);
                     } else {
                         linesDrawn = true;
+                        linesLayerReady = true;
                         updateLinesVisibility();
                         if (map.getZoom() >= linesMinZoom) {
                             statusEl.textContent = `${uniqueLines.size} S-Bahn-Linien geladen`;
@@ -1279,6 +1396,7 @@
         // ===================================================================
 
         const stationLayer = L.layerGroup().addTo(map);
+        stationLayerRef = stationLayer;
         const STATIONS_API = "/api/stations/sbahn";
 
         /** Icon für S-Bahn-Haltestellen */
@@ -1362,6 +1480,8 @@
 
         map.on("zoomend", updateStationLabelVisibility);
         loadSBahnStations();
+
     </script>
+    <script src="/static/mp.js"></script>
 </body>
 </html>

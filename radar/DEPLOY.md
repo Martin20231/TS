@@ -64,13 +64,39 @@ git push -u origin main
 {
   "player_name": "Martin",
   "server_url": "https://ts-multiplayer-radar.onrender.com/api/position",
+  "session_id": "DEIN_SESSION_CODE",
+  "session_role": "driver",
   "raildriver_dll_path": "E:\\Steam\\steamapps\\common\\RailWorks\\plugins\\RailDriver64.dll"
 }
 ```
 
 - **`player_name`** – eigener Name auf der Karte (jeder anders)
 - **`server_url`** – dieselbe Render-URL für alle
+- **`session_id`** – nach Tab „Session“ auf der Karte (Code eintragen)
+- **`session_role`** – `driver` oder `dispatch` (Leitstand)
 - **`raildriver_dll_path`** – nur lokal, Pfad zu deiner DLL
+
+**Cloud-Karte:** [https://ts-multiplayer-radar.onrender.com](https://ts-multiplayer-radar.onrender.com)  
+**Overlay:** `https://ts-multiplayer-radar.onrender.com/overlay?player=NAME&session=CODE`
+
+---
+
+## Alte Version sichern / Rollback
+
+Die **klassische Radar-only**-Version (vor Session/Leitstand) ist gesichert als:
+
+| Git | Bedeutung |
+|-----|-----------|
+| Branch `backup/render-classic-radar` | Stand wie früher auf Render |
+| Tag `v1-classic-radar` | Gleicher Stand, zum Zurücksetzen |
+
+**Auf Render zurückrollen:** Render Dashboard → Service → Manual Deploy → Branch `backup/render-classic-radar` wählen.
+
+**Lokal alte Karte testen:**
+
+```powershell
+git checkout backup/render-classic-radar -- radar/
+```
 
 ---
 

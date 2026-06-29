@@ -16,11 +16,15 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_socketio import SocketIO, emit
 
 from radar_config import CACHE_DIR, load_config
+from mp_geo import nearest_station
+from mp_session import SessionStore
 
 CONFIG = load_config()
+SESSIONS = SessionStore()
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
+_async_mode = "gevent" if os.environ.get("RENDER") else "threading"
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_async_mode)
 
 SERVER_HOST = CONFIG["server_host"]
 SERVER_PORT = int(os.environ.get("PORT", CONFIG["server_port"]))
@@ -42,8 +46,10 @@ lines_loading = False
 lines_load_error: str | None = None
 lines_load_progress = {"done": 0, "total": 0, "current": ""}
 _last_broadcast_payload: str | None = None
+_last_session_broadcast: dict[str, str] = {}
 
 RADAR_DIR = Path(__file__).parent
+STATIC_DIR = RADAR_DIR / "static"
 STATIONS_CACHE_FILE = CACHE_DIR / "stations.json"
 LINES_CACHE_FILE = CACHE_DIR / "lines.json"
 
@@ -144,12 +150,14 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
-def build_positions_payload() -> list[dict]:
+def build_positions_payload(session_id: str | None = None) -> list[dict]:
     """Baut die Spielerliste für REST und WebSocket."""
     now = time.time()
     result = []
 
     for entry in positions.values():
+        if session_id and entry.get("session_id") != session_id:
+            continue
         age = now - entry["timestamp"]
         if age >= STALE_PLAYER_SECONDS:
             continue
@@ -162,6 +170,30 @@ def build_positions_payload() -> list[dict]:
         })
 
     return result
+
+
+def positions_lookup() -> dict[str, dict]:
+    """Aktive Spieler als Dict für Session-Logik."""
+    lookup: dict[str, dict] = {}
+    for entry in build_positions_payload():
+        lookup[entry["player"]] = entry
+    return lookup
+
+
+def broadcast_session(session_id: str) -> None:
+    """Sendet Session-Update (Lobby, Leitstand, Trails)."""
+    global _last_session_broadcast
+
+    payload = SESSIONS.session_payload(session_id, positions_lookup())
+    if payload is None:
+        return
+
+    digest = json.dumps(payload, sort_keys=True, default=str)
+    if _last_session_broadcast.get(session_id) == digest:
+        return
+
+    _last_session_broadcast[session_id] = digest
+    socketio.emit("session_update", payload, room=f"session:{session_id}")
 
 
 def broadcast_positions() -> None:
@@ -305,29 +337,77 @@ def get_radar_config():
         "lan_map_url": public_base,
         "friend_tracker_url": f"{public_base}/api/position",
         "cloud": bool(os.environ.get("RENDER")),
+        "convoy_alert_km": float(CONFIG.get("convoy_alert_km", 2.0)),
+        "overlay_url": f"{public_base}/overlay",
     })
 
 
 @app.route("/")
 def index():
-    """Liefert die Leaflet-Karte aus."""
+    """Haupt-Karte mit Multiplayer-Panel."""
     return send_from_directory(RADAR_DIR, "index.html")
+
+
+@app.route("/overlay")
+def overlay_page():
+    """Kompaktes Zweitmonitor-Overlay."""
+    return send_from_directory(STATIC_DIR, "overlay.html")
+
+
+@app.route("/static/<path:filename>")
+def static_files(filename: str):
+    return send_from_directory(STATIC_DIR, filename)
 
 
 @app.post("/api/position")
 def post_position():
     """Empfängt Positions-Updates vom Python-Tracker."""
     data = request.get_json(force=True)
-    player = data.get("player", "Unbekannt")
+    player = str(data.get("player", "Unbekannt"))
+
+    session_id = str(data.get("session_id", "") or "").strip() or None
+    lat = float(data["lat"])
+    lon = float(data["lon"])
+    speed_kph = float(data.get("speed_kph", 0))
+    heading = float(data.get("heading", 0))
+
+    near = None
+    if stations_cache:
+        near = nearest_station(lat, lon, stations_cache, max_km=5.0)
 
     positions[player] = {
         "player": player,
-        "lat": float(data["lat"]),
-        "lon": float(data["lon"]),
-        "speed_kph": float(data.get("speed_kph", 0)),
-        "heading": float(data.get("heading", 0)),
+        "lat": lat,
+        "lon": lon,
+        "speed_kph": speed_kph,
+        "heading": heading,
         "timestamp": data.get("timestamp", time.time()),
+        "session_id": session_id,
+        "role": str(data.get("role", "driver")),
+        "loco": str(data.get("loco", "")),
+        "nearest_stop": near["name"] if near else "",
+        "nearest_stop_km": round(near["distance_km"], 2) if near else None,
     }
+
+    if session_id:
+        SESSIONS.join(
+            session_id,
+            player,
+            role=str(data.get("role", "driver")),
+            loco=str(data.get("loco", "")),
+        )
+        SESSIONS.update_position(
+            session_id,
+            player,
+            lat,
+            lon,
+            speed_kph,
+            heading,
+            loco=str(data.get("loco", "")),
+            nearest_station_name=near["name"] if near else None,
+            nearest_station_km=near["distance_km"] if near else None,
+        )
+        broadcast_session(session_id)
 
     broadcast_positions()
     return jsonify({"ok": True})
@@ -356,6 +436,20 @@ def get_status():
 def handle_connect():
     """Neue Karten-Verbindung – sofort aktuellen Stand senden."""
     emit("positions_update", build_positions_payload())
+
+
+@socketio.on("join_session")
+def handle_join_session(data):
+    """Client abonniert Session-Updates (Lobby / Leitstand)."""
+    session_id = str((data or {}).get("session_id", "")).strip()
+    if not session_id or SESSIONS.get(session_id) is None:
+        return
+    from flask_socketio import join_room
+
+    join_room(f"session:{session_id}")
+    payload = SESSIONS.session_payload(session_id, positions_lookup())
+    if payload:
+        emit("session_update", payload)
 
 
 def simplify_coordinates(coords: list[list[float]], step: int = 4) -> list[list[float]]:
@@ -659,6 +753,114 @@ def get_sbahn_lines():
     return jsonify(lines_cache)
 
 
+@app.post("/api/sessions")
+def create_session():
+    data = request.get_json(force=True) or {}
+    session = SESSIONS.create(str(data.get("name", "Fahrt")))
+    base = get_public_base_url()
+    return jsonify({
+        "ok": True,
+        "session_id": session.session_id,
+        "name": session.name,
+        "join_url": f"{base}/?session={session.session_id}",
+    })
+
+
+@app.get("/api/sessions/<session_id>")
+def get_session(session_id: str):
+    payload = SESSIONS.session_payload(session_id, positions_lookup())
+    if payload is None:
+        return jsonify({"ok": False, "error": "Session nicht gefunden"}), 404
+    return jsonify({"ok": True, **payload})
+
+
+@app.post("/api/sessions/<session_id>/join")
+def join_session_api(session_id: str):
+    data = request.get_json(force=True) or {}
+    player = str(data.get("player", CONFIG["player_name"]))
+    role = str(data.get("role", "driver"))
+    loco = str(data.get("loco", ""))
+    session = SESSIONS.join(session_id, player, role=role, loco=loco)
+    if session is None:
+        return jsonify({"ok": False, "error": "Session nicht gefunden"}), 404
+    broadcast_session(session_id)
+    payload = SESSIONS.session_payload(session_id, positions_lookup())
+    return jsonify({"ok": True, **payload})
+
+
+@app.post("/api/sessions/<session_id>/ready")
+def session_ready(session_id: str):
+    data = request.get_json(force=True) or {}
+    player = str(data.get("player", CONFIG["player_name"]))
+    ready = bool(data.get("ready", True))
+    if not SESSIONS.set_ready(session_id, player, ready):
+        return jsonify({"ok": False, "error": "Spieler nicht in Session"}), 400
+    broadcast_session(session_id)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/sessions/<session_id>/messages")
+def post_session_message(session_id: str):
+    data = request.get_json(force=True) or {}
+    sender = str(data.get("sender", CONFIG["player_name"]))
+    text = str(data.get("text", ""))
+    target = data.get("target")
+    target_str = str(target).strip() if target else None
+
+    msg = SESSIONS.add_message(session_id, sender, text, target=target_str)
+    if msg is None:
+        return jsonify({"ok": False, "error": "Nachricht konnte nicht gesendet werden"}), 400
+
+    broadcast_session(session_id)
+    socketio.emit(
+        "dispatch_message",
+        {
+            "id": msg.id,
+            "sender": msg.sender,
+            "target": msg.target,
+            "text": msg.text,
+            "timestamp": msg.timestamp,
+            "session_id": session_id,
+        },
+        room=f"session:{session_id}",
+    )
+    return jsonify({
+        "ok": True,
+        "message": {
+            "id": msg.id,
+            "sender": msg.sender,
+            "target": msg.target,
+            "text": msg.text,
+            "timestamp": msg.timestamp,
+        },
+    })
+
+
+@app.get("/api/sessions/<session_id>/messages")
+def get_session_messages(session_id: str):
+    after = int(request.args.get("after", 0))
+    messages = SESSIONS.messages_after(session_id, after)
+    return jsonify({
+        "messages": [
+            {
+                "id": m.id,
+                "sender": m.sender,
+                "target": m.target,
+                "text": m.text,
+                "timestamp": m.timestamp,
+            }
+            for m in messages
+        ],
+    })
+
+
+@app.get("/api/sessions/<session_id>/convoy")
+def get_convoy(session_id: str):
+    player = request.args.get("player", CONFIG["player_name"])
+    convoy = SESSIONS.build_convoy(session_id, player, positions_lookup())
+    return jsonify({"convoy": convoy})
+
+
 if __name__ == "__main__":
     local_ip = get_local_ip()
     print("=" * 55)
@@ -669,7 +871,7 @@ if __name__ == "__main__":
     print(f"Tracker-URL: http://{local_ip}:{SERVER_PORT}/api/position")
     print("WebSocket:   aktiv (Live-Updates)")
     print(f"Spielername: {CONFIG['player_name']}  (in config.json ändern)")
-    print(f"Konfiguration: {RADAR_DIR / 'config.json'}")
+    print(f"Overlay:     http://{local_ip}:{SERVER_PORT}/overlay")
     print("=" * 55)
 
     socketio.start_background_task(stale_broadcast_loop)

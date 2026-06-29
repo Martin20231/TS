@@ -7,16 +7,12 @@ radar/config.json
 .venv/
 venv/
 
-# Unity (falls später mehr Dateien dazukommen)
-[Ll]ibrary/
-[Tt]emp/
-[Oo]bj/
-[Bb]uild/
-[Bb]uilds/
-Logs/
-UserSettings/
-
-# PyInstaller (Radar-Exe)
+# PyInstaller / Build-Artefakte
 radar/dist/
 radar/build/
 radar/*.spec
+
+# Unity (Archiv)
+archive/unity/**/[Ll]ibrary/
+archive/unity/**/[Tt]emp/
+archive/unity/**/[Oo]bj/

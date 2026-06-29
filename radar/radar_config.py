@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from copy import deepcopy
 from pathlib import Path
 
-RADAR_DIR = Path(__file__).parent
+
+def get_radar_dir() -> Path:
+    """Ordner der Exe (gebündelt) oder des radar-Skripts."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+RADAR_DIR = get_radar_dir()
 CONFIG_PATH = RADAR_DIR / "config.json"
 CACHE_DIR = RADAR_DIR / "cache"
 
@@ -22,6 +31,9 @@ DEFAULT_CONFIG: dict = {
     "server_url": "http://127.0.0.1:8080/api/position",
     "lines_min_zoom": 10,
     "route_trail_minutes": 30,
+    "session_id": "",
+    "session_role": "driver",
+    "convoy_alert_km": 2.0,
 }
 
 

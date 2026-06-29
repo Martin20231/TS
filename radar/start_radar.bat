@@ -36,6 +36,12 @@ start "" "http://localhost:8080"
 echo.
 echo  Fertig! Die Karte sollte sich im Browser oeffnen.
 echo.
+echo  Multiplayer:
+echo    1. Tab SESSION - Fahrt erstellen, Link an Freunde
+echo    2. session_id in config.json eintragen (jeder Fahrer)
+echo    3. Tab LEITSTAND - Koordination / Textbefehle
+echo    4. Overlay-Button fuer zweiten Monitor
+echo.
 echo  Wichtig:
 echo    1. Train Simulator starten und eine Fahrt beginnen
 echo    2. Deinen Namen in config.json aendern (player_name)

@@ -1,0 +1,33 @@
+{
+  "route": "S-Bahn Berlin – Adlershof",
+  "signals": [
+    {
+      "id": "SW_S1",
+      "label": "Einfahrt Nord",
+      "lat": 52.43612,
+      "lon": 13.51385,
+      "index": 1
+    },
+    {
+      "id": "SW_S2",
+      "label": "Gleis 3 Ausfahrt",
+      "lat": 52.43571,
+      "lon": 13.51495,
+      "index": 2
+    },
+    {
+      "id": "SW_S3",
+      "label": "Gleis 4 Einfahrt",
+      "lat": 52.43542,
+      "lon": 13.51562,
+      "index": 3
+    },
+    {
+      "id": "SW_S4",
+      "label": "Zwischensignal Ost",
+      "lat": 52.43488,
+      "lon": 13.51648,
+      "index": 4
+    }
+  ]
+}
