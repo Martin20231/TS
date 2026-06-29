@@ -22,7 +22,11 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_socketio import SocketIO, emit
 
 from radar_config import CACHE_DIR, load_config
-from mp_geo import nearest_station
+from mp_geo import (
+    deduplicate_sbahn_stations,
+    format_sbahn_station_name,
+    nearest_station,
+)
 from mp_session import SessionStore
 
 CONFIG = load_config()
@@ -54,7 +58,7 @@ _last_session_broadcast: dict[str, str] = {}
 
 RADAR_DIR = Path(__file__).parent
 STATIC_DIR = RADAR_DIR / "static"
-STATIONS_CACHE_FILE = CACHE_DIR / "stations.json"
+STATIONS_CACHE_FILE = CACHE_DIR / "stations_sbahn_v2.json"
 LINES_CACHE_FILE = CACHE_DIR / "lines.json"
 
 # Berlin + Brandenburg-Umland (inkl. Flughafen BER / S9 / S45 / S46 / S8 / S85)
@@ -80,32 +84,41 @@ SBahn_LINE_COLORS: dict[str, str] = {
     "S85": "#00998F",
 }
 
-OVERPASS_STATIONS_QUERY = """
+OVERPASS_OPERATOR_STATIONS_QUERY = """
 [out:json][timeout:90];
-node["railway"~"station|halt"]({south},{west},{north},{east});
+(
+  node["railway"~"station|halt"]["operator"~"S-Bahn Berlin",i]({south},{west},{north},{east});
+  node["railway"~"station|halt"]["network"~"S-Bahn Berlin",i]({south},{west},{north},{east});
+);
 out body;
+"""
+
+OVERPASS_SBahn_STOPS_QUERY = """
+[out:json][timeout:120];
+(
+  relation["route"="light_rail"]["ref"~"^({line_refs})$"]({south},{west},{north},{east});
+)->.routes;
+(
+  node(r.routes:"stop");
+  node(r.routes:"stop_entry_only");
+);
+out body;
+(
+  relation["route"="light_rail"]["ref"~"^({line_refs})$"]({south},{west},{north},{east});
+)->.routes;
+way(r.routes:"stop");
+out center;
 """
 
 
 def is_sbahn_station(tags: dict) -> bool:
-    """Erkennt Berliner S-Bahn-Halte anhand typischer OSM-Tags."""
-    name = tags.get("name", "")
-    network = tags.get("network", "")
+    """Legacy-Hilfsfunktion – Stationen kommen aus S-Bahn-Routen, nicht mehr aus allen Halten."""
     operator = tags.get("operator", "")
-
-    if "S-Bahn" in network or "S-Bahn" in operator:
+    network = tags.get("network", "")
+    if "S-Bahn Berlin" in operator:
         return True
-    if name.startswith("S "):
+    if "S-Bahn" in network:
         return True
-    if tags.get("light_rail") == "yes":
-        return True
-    if tags.get("station") == "light_rail":
-        return True
-    if tags.get("subway") == "yes" and "Berlin" in operator:
-        return True
-    if "sbahn.berlin" in tags.get("website", ""):
-        return True
-
     return False
 
 
@@ -543,47 +556,87 @@ def overpass_post(query: str, timeout: int = 90) -> requests.Response:
     raise requests.RequestException("Overpass-Abfrage fehlgeschlagen")
 
 
-def fetch_sbahn_stations() -> list[dict]:
-    """Lädt S-Bahn-Stationen aus OpenStreetMap (Overpass API)."""
-    south, west, north, east = SBahn_BBOX
-    query = OVERPASS_STATIONS_QUERY.format(
-        south=south, west=west, north=north, east=east
-    )
+def _parse_overpass_stops(
+    elements: list[dict],
+    raw_stations: list[dict],
+    seen_ids: set[str],
+    *,
+    require_operator_tag: bool = False,
+) -> None:
+    """Hängt Haltepunkte aus einer Overpass-Antwort an raw_stations an."""
 
-    response = overpass_post(query, timeout=90)
+    def add_stop(element_id: int | str, name: str, lat: float, lon: float) -> None:
+        key = f"{element_id}"
+        if key in seen_ids:
+            return
+        seen_ids.add(key)
+        raw_stations.append({
+            "name": format_sbahn_station_name(name),
+            "lat": lat,
+            "lon": lon,
+        })
 
-    seen: set[str] = set()
-    stations: list[dict] = []
-
-    for element in response.json().get("elements", []):
-        if element.get("type") != "node":
-            continue
-
+    for element in elements:
         tags = element.get("tags", {})
-        if not is_sbahn_station(tags):
+        if require_operator_tag and not is_sbahn_station(tags):
             continue
 
-        name = tags.get("name") or tags.get("official_name")
+        name = tags.get("name") or tags.get("name:de") or tags.get("official_name")
         if not name:
             continue
 
-        lat = element.get("lat")
-        lon = element.get("lon")
-        if lat is None or lon is None:
+        element_type = element.get("type")
+        if element_type == "node":
+            lat = element.get("lat")
+            lon = element.get("lon")
+            if lat is None or lon is None:
+                continue
+            add_stop(element["id"], name, lat, lon)
             continue
 
-        # Anzeigename: „S “-Präfix wie im Simulator, falls noch nicht vorhanden
-        display_name = name if name.startswith("S ") else f"S {name}"
+        if element_type == "way":
+            center = element.get("center")
+            if center:
+                add_stop(element["id"], name, center["lat"], center["lon"])
 
-        # Duplikate vermeiden (gleicher Name + gerundete Koordinate)
-        key = f"{name}|{round(lat, 5)}|{round(lon, 5)}"
-        if key in seen:
-            continue
-        seen.add(key)
 
-        stations.append({"name": display_name, "lat": lat, "lon": lon})
+def fetch_sbahn_stations() -> list[dict]:
+    """Lädt echte S-Bahn-Halte aus Linienrelationen + S-Bahn-Berlin-Operator."""
+    south, west, north, east = SBahn_BBOX
+    line_refs = "|".join(SBahn_LINE_COLORS.keys())
 
-    stations.sort(key=lambda s: s["name"])
+    route_query = OVERPASS_SBahn_STOPS_QUERY.format(
+        line_refs=line_refs,
+        south=south,
+        west=west,
+        north=north,
+        east=east,
+    )
+    operator_query = OVERPASS_OPERATOR_STATIONS_QUERY.format(
+        south=south,
+        west=west,
+        north=north,
+        east=east,
+    )
+
+    route_response = overpass_post(route_query, timeout=120)
+    operator_response = overpass_post(operator_query, timeout=90)
+
+    raw_stations: list[dict] = []
+    seen_ids: set[str] = set()
+    _parse_overpass_stops(route_response.json().get("elements", []), raw_stations, seen_ids)
+    _parse_overpass_stops(
+        operator_response.json().get("elements", []),
+        raw_stations,
+        seen_ids,
+        require_operator_tag=True,
+    )
+
+    stations = deduplicate_sbahn_stations(raw_stations)
+    print(
+        f"S-Bahn-Stationen geladen: {len(stations)} eindeutig "
+        f"(aus {len(raw_stations)} OSM-Haltepunkten)"
+    )
     return stations
 
 
