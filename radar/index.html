@@ -432,9 +432,26 @@
                     throw new Error(`HTTP ${response.status}`);
                 }
                 const cfg = await response.json();
-                localPlayerName = cfg.player_name || localPlayerName;
                 linesMinZoom = cfg.lines_min_zoom ?? 10;
                 routeTrailMaxPoints = (cfg.route_trail_minutes ?? 30) * 60;
+
+                if (cfg.cloud) {
+                    const fromUrl = new URLSearchParams(window.location.search).get("player");
+                    const saved = localStorage.getItem("radar-player-name");
+                    localPlayerName = (fromUrl || saved || localPlayerName).trim();
+                    if (fromUrl) {
+                        localStorage.setItem("radar-player-name", localPlayerName);
+                    }
+                    if (!saved && !fromUrl) {
+                        const chosen = window.prompt("Dein Name auf der Karte:", localPlayerName);
+                        if (chosen && chosen.trim()) {
+                            localPlayerName = chosen.trim();
+                            localStorage.setItem("radar-player-name", localPlayerName);
+                        }
+                    }
+                } else {
+                    localPlayerName = cfg.player_name || localPlayerName;
+                }
 
                 document.getElementById("cfg-player").textContent = localPlayerName;
                 const friendUrl = document.getElementById("cfg-friend-url");
