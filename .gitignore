@@ -1,0 +1,17 @@
+# Persönliche Tracker-Konfiguration
+radar/config.json
+
+# Python
+**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Unity (falls später mehr Dateien dazukommen)
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+Logs/
+UserSettings/

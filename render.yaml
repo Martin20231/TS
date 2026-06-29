@@ -1,0 +1,16 @@
+# Render Blueprint – wenn das ganze "ts"-Projekt das Git-Repo ist.
+
+services:
+  - type: web
+    name: ts-multiplayer-radar
+    runtime: python
+    rootDir: radar
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT --timeout 120 server:app
+    healthCheckPath: /api/status
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: RENDER
+        value: "true"

@@ -1,0 +1,16 @@
+# Render Blueprint – Web Service für TS Multiplayer-Radar
+# Repo: nur den Ordner "radar" als GitHub-Root hochladen ODER rootDir anpassen.
+
+services:
+  - type: web
+    name: ts-multiplayer-radar
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT --timeout 120 server:app
+    healthCheckPath: /api/status
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: RENDER
+        value: "true"

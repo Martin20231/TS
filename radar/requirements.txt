@@ -1,0 +1,6 @@
+# Radar-Server (lokal + Render)
+requests>=2.31.0
+flask>=3.0.0
+flask-socketio>=5.3.0
+gunicorn>=22.0.0
+eventlet>=0.36.0

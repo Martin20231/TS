@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Train Simulator – Multiplayer-Radar</title>
+
+    <!-- Leaflet.js – kostenlose Kartenbibliothek -->
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""
+    />
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
+    <!-- Socket.IO – vom Radar-Server (passende Version, kein CDN nötig) -->
+    <script src="/socket.io/socket.io.js"></script>
+
+    <style>
+        /* Vollbild-Karte ohne Ränder */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body, #map {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Status-LEDs */
+        #status-leds {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 8px 0;
+            padding: 8px 0;
+            border-top: 1px solid #e5e7eb;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .led-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .led {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #d1d5db;
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+            flex-shrink: 0;
+        }
+
+        .led.ok { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.55); }
+        .led.warn { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.55); }
+        .led.err { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.55); }
+
+        .help-box {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #4b5563;
+            line-height: 1.45;
+        }
+
+        .help-box summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: #1d4ed8;
+            margin-bottom: 6px;
+        }
+
+        .help-box ol {
+            margin: 6px 0 0 18px;
+        }
+
+        .help-box li {
+            margin-bottom: 4px;
+        }
+
+        .help-url {
+            display: block;
+            margin-top: 6px;
+            padding: 6px 8px;
+            background: #f1f5f9;
+            border-radius: 6px;
+            font-family: Consolas, monospace;
+            font-size: 11px;
+            word-break: break-all;
+            user-select: all;
+        }
+
+        #info-panel .subtitle {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+
+        #panel-toggle {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 1001;
+            display: none;
+        }
+
+        #info-panel.collapsed {
+            padding: 8px 12px;
+        }
+
+        #info-panel.collapsed .panel-body {
+            display: none;
+        }
+
+        body.dark-mode #status-leds {
+            border-color: #444;
+        }
+
+        body.dark-mode .led-item {
+            color: #d1d5db;
+        }
+
+        body.dark-mode .help-box {
+            color: #bbb;
+        }
+
+        body.dark-mode .help-box summary {
+            color: #60a5fa;
+        }
+
+        body.dark-mode .help-url {
+            background: #2a2a2a;
+            color: #e5e5e5;
+        }
+
+        body.dark-mode .subtitle {
+            color: #9ca3af !important;
+        }
+
+        /* Info-Leiste oben links */
+        #info-panel {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.92);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-family: "Segoe UI", sans-serif;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        #info-panel h1 {
+            font-size: 16px;
+            margin-bottom: 6px;
+        }
+
+        #info-panel .status {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #555;
+        }
+
+        #players-list {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #ddd;
+            max-height: 140px;
+            overflow-y: auto;
+        }
+
+        .player-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .player-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        /* S-Bahn-Stationen: grünes S-Icon */
+        .sbahn-station-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            background: #00843d;
+            color: white;
+            font-weight: bold;
+            font-size: 11px;
+            font-family: "Segoe UI", sans-serif;
+            border: 2px solid white;
+            border-radius: 4px;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+        }
+
+        .station-label {
+            background: rgba(255, 255, 255, 0.9) !important;
+            border: 1px solid #00843d !important;
+            color: #1a1a1a !important;
+            font-size: 11px !important;
+            font-weight: 600 !important;
+            padding: 2px 6px !important;
+            border-radius: 4px !important;
+        }
+
+        /* Zug-Marker mit Fahrtrichtung (Pfeil nach oben = Norden) */
+        .train-icon-inner {
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform-origin: center center;
+            will-change: transform;
+            filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.45));
+        }
+
+        .train-icon-shape {
+            width: 0;
+            height: 0;
+            border-left: 7px solid transparent;
+            border-right: 7px solid transparent;
+            border-bottom: 16px solid var(--train-color, #2563eb);
+        }
+
+        /* Nächster Halt – Station hervorgehoben */
+        .sbahn-station-icon.next-stop {
+            background: #f59e0b;
+            border-color: #fff;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.45);
+            transform: scale(1.15);
+        }
+
+        #next-stop-status {
+            font-weight: 600;
+            color: #1d4ed8;
+        }
+
+        /* Steuerungs-Buttons */
+        #controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 8px 0;
+        }
+
+        .ctrl-btn {
+            font-family: "Segoe UI", sans-serif;
+            font-size: 12px;
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: #f8fafc;
+            cursor: pointer;
+        }
+
+        .ctrl-btn:hover {
+            background: #e2e8f0;
+        }
+
+        .ctrl-btn.active {
+            background: #2563eb;
+            color: white;
+            border-color: #1d4ed8;
+        }
+
+        .player-row-offline {
+            opacity: 0.55;
+            font-style: italic;
+        }
+
+        .train-icon-inner.dimmed {
+            opacity: 0.45;
+            filter: grayscale(0.8) drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+        }
+
+        /* Dark Mode */
+        body.dark-mode #info-panel {
+            background: rgba(30, 30, 30, 0.92);
+            color: #e5e5e5;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        }
+
+        body.dark-mode #info-panel .status {
+            color: #aaa;
+        }
+
+        body.dark-mode #next-stop-status {
+            color: #60a5fa;
+        }
+
+        body.dark-mode #players-list {
+            border-top-color: #444;
+        }
+
+        body.dark-mode .ctrl-btn {
+            background: #333;
+            color: #eee;
+            border-color: #555;
+        }
+
+        body.dark-mode .ctrl-btn:hover {
+            background: #444;
+        }
+
+        body.dark-mode .ctrl-btn.active {
+            background: #3b82f6;
+            border-color: #2563eb;
+        }
+
+        body.dark-mode .station-label {
+            background: rgba(40, 40, 40, 0.92) !important;
+            color: #eee !important;
+            border-color: #00843d !important;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Info-Panel -->
+    <div id="info-panel">
+        <h1>TS Multiplayer-Radar</h1>
+        <p class="subtitle">Live-Karte für Train Simulator Classic</p>
+
+        <div class="panel-body">
+            <div id="status-leds">
+                <span class="led-item"><span class="led warn" id="led-server"></span> Server</span>
+                <span class="led-item"><span class="led" id="led-live"></span> Live</span>
+                <span class="led-item"><span class="led" id="led-gps"></span> GPS</span>
+            </div>
+            <p class="status" id="connection-status">Starte Verbindung …</p>
+
+            <div id="controls">
+                <button class="ctrl-btn active" id="btn-follow" type="button" title="Karte folgt deinem Zug">Kamera folgt</button>
+                <button class="ctrl-btn" id="btn-dark" type="button" title="Hell/Dunkel umschalten">Dark Mode</button>
+                <button class="ctrl-btn" id="btn-trail" type="button" title="Deine zurückgelegte Strecke">Route an</button>
+            </div>
+
+            <p class="status" id="train-status">Eigener Zug (<span id="cfg-player">…</span>): warte auf Daten …</p>
+            <p class="status" id="next-stop-status">Nächster Halt: –</p>
+            <div id="players-list"></div>
+            <p class="status" id="lines-status">Lade S-Bahn-Linien …</p>
+            <p class="status" id="station-status">Lade S-Bahn-Stationen …</p>
+
+            <details class="help-box">
+                <summary>Hilfe &amp; Einrichtung</summary>
+                <ol>
+                    <li><strong>Lokal:</strong> <code>start_radar.bat</code> · <strong>Cloud:</strong> <code>start_tracker.bat</code></li>
+                    <li>Train Simulator starten und eine <strong>Fahrt beginnen</strong></li>
+                    <li>Namen in <strong>config.json</strong> (<code>player_name</code>)</li>
+                    <li>Freunde: dieselbe <code>server_url</code> wie unten</li>
+                </ol>
+                <span class="help-url" id="cfg-friend-url">lädt …</span>
+                <p style="margin-top:6px">Grün <strong>S</strong> = Station · Orange = nächster Halt · Blaue Linie = deine Route</p>
+            </details>
+        </div>
+    </div>
+
+    <!-- Karten-Container -->
+    <div id="map"></div>
+
+    <script>
+        // ===================================================================
+        // Karte initialisieren (OpenStreetMap über Leaflet)
+        // ===================================================================
+
+        let localPlayerName = "MeinZug";
+        let linesMinZoom = 10;
+        let routeTrailMaxPoints = 1800;
+        let trailEnabled = localStorage.getItem("radar-trail") !== "false";
+
+        // Farben für andere Spieler (eigener Zug ist immer blau)
+        const OTHER_PLAYER_COLORS = [
+            "#dc2626", "#ea580c", "#ca8a04", "#7c3aed",
+            "#db2777", "#0891b2", "#4f46e5", "#16a34a",
+        ];
+        const SELF_COLOR = "#2563eb";
+
+        // Startzentrum (wird beim ersten echten GPS-Signal ersetzt)
+        const DEFAULT_CENTER = [52.52, 13.405];
+        const DEFAULT_ZOOM = 6;
+        const TRACKING_ZOOM = 14;
+
+        let hasCenteredOnSelf = false;
+        let followSelfEnabled = true;
+
+        const map = L.map("map", {
+            preferCanvas: true,
+            zoomAnimation: true,
+            fadeAnimation: false,
+        }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+
+        const lineCanvasRenderer = L.canvas({ padding: 0.5 });
+        const linesLayer = L.layerGroup();
+
+        // Routen-Spur (zurückgelegte Strecke)
+        const routeTrailPoints = [];
+        let routeTrailLine = null;
+        let linesDrawn = false;
+        let linesDataCache = [];
+
+        function setLed(elementId, state) {
+            const led = document.getElementById(elementId);
+            if (led) {
+                led.className = `led ${state || ""}`.trim();
+            }
+        }
+
+        async function loadRadarConfig() {
+            try {
+                const response = await fetch("/api/config");
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const cfg = await response.json();
+                localPlayerName = cfg.player_name || localPlayerName;
+                linesMinZoom = cfg.lines_min_zoom ?? 10;
+                routeTrailMaxPoints = (cfg.route_trail_minutes ?? 30) * 60;
+
+                document.getElementById("cfg-player").textContent = localPlayerName;
+                const friendUrl = document.getElementById("cfg-friend-url");
+                if (friendUrl && cfg.friend_tracker_url) {
+                    friendUrl.textContent = cfg.friend_tracker_url;
+                }
+            } catch (error) {
+                console.warn("Konfiguration nicht geladen:", error.message);
+                document.getElementById("cfg-player").textContent = localPlayerName;
+                const friendUrl = document.getElementById("cfg-friend-url");
+                if (friendUrl) {
+                    friendUrl.textContent = "Server nicht erreichbar – start_radar.bat starten";
+                }
+            }
+        }
+
+        function setTrailEnabled(enabled) {
+            trailEnabled = enabled;
+            localStorage.setItem("radar-trail", enabled ? "true" : "false");
+            document.getElementById("btn-trail").classList.toggle("active", enabled);
+            document.getElementById("btn-trail").textContent = enabled ? "Route an" : "Route aus";
+
+            if (!enabled && routeTrailLine) {
+                map.removeLayer(routeTrailLine);
+                routeTrailLine = null;
+                routeTrailPoints.length = 0;
+            }
+        }
+
+        function addRouteTrailPoint(lat, lon) {
+            if (!trailEnabled) {
+                return;
+            }
+
+            const last = routeTrailPoints[routeTrailPoints.length - 1];
+            if (last) {
+                const dist = haversineKm(last[0], last[1], lat, lon);
+                if (dist < 0.01) {
+                    return;
+                }
+            }
+
+            routeTrailPoints.push([lat, lon]);
+            while (routeTrailPoints.length > routeTrailMaxPoints) {
+                routeTrailPoints.shift();
+            }
+
+            if (!routeTrailLine) {
+                routeTrailLine = L.polyline(routeTrailPoints, {
+                    color: "#2563eb",
+                    weight: 4,
+                    opacity: 0.45,
+                    interactive: false,
+                    renderer: lineCanvasRenderer,
+                }).addTo(map);
+            } else {
+                routeTrailLine.setLatLngs(routeTrailPoints);
+            }
+        }
+
+        function updateLinesVisibility() {
+            if (!linesDrawn || !linesLayer) {
+                return;
+            }
+
+            const statusEl = document.getElementById("lines-status");
+            const uniqueCount = linesDataCache.length
+                ? new Set(linesDataCache.map((s) => s.line)).size
+                : 0;
+
+            if (map.getZoom() >= linesMinZoom) {
+                if (!map.hasLayer(linesLayer)) {
+                    map.addLayer(linesLayer);
+                }
+                if (uniqueCount > 0 && !statusEl.textContent.includes("geladen")) {
+                    statusEl.textContent = `${uniqueCount} S-Bahn-Linien geladen`;
+                }
+            } else {
+                if (map.hasLayer(linesLayer)) {
+                    map.removeLayer(linesLayer);
+                }
+                if (uniqueCount > 0) {
+                    statusEl.textContent = `${uniqueCount} Linien · ab Zoom ${linesMinZoom} sichtbar (heranzoomen)`;
+                }
+            }
+        }
+
+        loadRadarConfig();
+
+        // Karten-Layer: Hell (OSM) und Dunkel (CartoDB)
+        const lightTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        });
+
+        const darkTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        });
+
+        let isDarkMode = localStorage.getItem("radar-dark-mode") === "true";
+        let activeTileLayer = isDarkMode ? darkTiles : lightTiles;
+        activeTileLayer.addTo(map);
+
+        if (isDarkMode) {
+            document.body.classList.add("dark-mode");
+        }
+
+        /** Wechselt zwischen Hell- und Dunkelkarte */
+        function setDarkMode(enabled) {
+            isDarkMode = enabled;
+            localStorage.setItem("radar-dark-mode", enabled ? "true" : "false");
+            document.body.classList.toggle("dark-mode", enabled);
+
+            map.removeLayer(activeTileLayer);
+            activeTileLayer = enabled ? darkTiles : lightTiles;
+            activeTileLayer.addTo(map);
+            activeTileLayer.bringToBack();
+
+            document.getElementById("btn-dark").classList.toggle("active", enabled);
+            document.getElementById("btn-dark").textContent = enabled ? "Dark Mode an" : "Dark Mode";
+        }
+
+        /** Kamera-Follow ein/aus */
+        function setFollowSelf(enabled) {
+            followSelfEnabled = enabled;
+            document.getElementById("btn-follow").classList.toggle("active", enabled);
+            document.getElementById("btn-follow").textContent = enabled ? "Kamera folgt" : "Kamera frei";
+        }
+
+        document.getElementById("btn-follow").addEventListener("click", () => {
+            setFollowSelf(!followSelfEnabled);
+        });
+
+        document.getElementById("btn-dark").addEventListener("click", () => {
+            setDarkMode(!isDarkMode);
+        });
+
+        document.getElementById("btn-trail").addEventListener("click", () => {
+            setTrailEnabled(!trailEnabled);
+        });
+
+        // Beim manuellen Verschieben der Karte Follow deaktivieren
+        map.on("dragstart", () => setFollowSelf(false));
+        map.on("zoomend", updateLinesVisibility);
+
+        setDarkMode(isDarkMode);
+        setFollowSelf(followSelfEnabled);
+        setTrailEnabled(trailEnabled);
+
+        // ===================================================================
+        // Zug-Marker vorbereiten
+        // ===================================================================
+
+        /**
+         * Erzeugt ein drehbares Zug-Icon (Pfeil zeigt Fahrtrichtung).
+         * @param {string} color - CSS-Farbe
+         * @param {number} heading - Richtung in Grad (0 = Norden)
+         * @returns {L.DivIcon} Leaflet-Icon
+         */
+        function createTrainIcon(color, heading = 0, dimmed = false) {
+            const dimClass = dimmed ? " dimmed" : "";
+            return L.divIcon({
+                className: "",
+                html: `<div class="train-icon-inner${dimClass}" style="transform: rotate(${heading}deg);">
+                    <div class="train-icon-shape" style="--train-color: ${color};"></div>
+                </div>`,
+                iconSize: [26, 26],
+                iconAnchor: [13, 13],
+            });
+        }
+
+        /** Kurzer Winkelunterschied für weiche Drehung (0–360°) */
+        function shortestAngleDelta(from, to) {
+            let delta = (to - from) % 360;
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+            return delta;
+        }
+
+        /** Popup-Text mit Name, Geschwindigkeit und Richtung */
+        function buildTrainPopup(label, speedKph, heading, distanceKm) {
+            const speed = Number.isFinite(speedKph) ? `${Math.round(speedKph)} km/h` : "– km/h";
+            const direction = Number.isFinite(heading) ? `${Math.round(heading)}°` : "–°";
+            let text = `<strong>${label}</strong><br>${speed} · Richtung ${direction}`;
+            if (Number.isFinite(distanceKm)) {
+                text += `<br>Entfernung: ${formatDistance(distanceKm)}`;
+            }
+            return text;
+        }
+
+        /** Farbe pro Spieler – eigener Zug immer blau, andere per Name-Hash */
+        function getPlayerColor(playerName) {
+            if (playerName === localPlayerName) {
+                return SELF_COLOR;
+            }
+
+            let hash = 0;
+            for (let i = 0; i < playerName.length; i++) {
+                hash = playerName.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            return OTHER_PLAYER_COLORS[Math.abs(hash) % OTHER_PLAYER_COLORS.length];
+        }
+
+        /** Entfernung zwischen zwei GPS-Punkten in km */
+        function haversineKm(lat1, lon1, lat2, lon2) {
+            const radiusKm = 6371;
+            const phi1 = lat1 * Math.PI / 180;
+            const phi2 = lat2 * Math.PI / 180;
+            const dPhi = (lat2 - lat1) * Math.PI / 180;
+            const dLambda = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(dPhi / 2) ** 2
+                + Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) ** 2;
+            return radiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        function formatLastSeen(seconds) {
+            if (seconds < 60) {
+                return `vor ${seconds} s`;
+            }
+            const minutes = Math.round(seconds / 60);
+            return `vor ${minutes} Min`;
+        }
+
+        function formatDistance(km) {
+            if (km < 1) {
+                return `${Math.round(km * 1000)} m`;
+            }
+            return `${km.toFixed(1)} km`;
+        }
+
+        /** Kompassrichtung von Punkt A nach Punkt B in Grad */
+        function bearingDegrees(lat1, lon1, lat2, lon2) {
+            const phi1 = lat1 * Math.PI / 180;
+            const phi2 = lat2 * Math.PI / 180;
+            const dLambda = (lon2 - lon1) * Math.PI / 180;
+            const y = Math.sin(dLambda) * Math.cos(phi2);
+            const x = Math.cos(phi1) * Math.sin(phi2)
+                - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLambda);
+            return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+        }
+
+        /** Liegt die Station ungefähr in Fahrtrichtung vor dem Zug? */
+        function isStationAhead(trainHeading, bearingToStation) {
+            return Math.abs(shortestAngleDelta(trainHeading, bearingToStation)) <= 85;
+        }
+
+        // S-Bahn-Stationen für Haltestellen-Berechnung
+        const sbahnStations = [];
+        const stationByName = new Map();
+        let highlightedNextStopName = null;
+        let lastNextStopUpdateMs = 0;
+
+        const NEXT_STOP_MIN_DISTANCE_KM = 0.2;   // Stationen unter 200 m gelten als „aktuell“
+        const NEXT_STOP_MAX_DISTANCE_KM = 15;  // Suchradius
+
+        /**
+         * Findet den nächsten Haltestellen-Halt vor dem Zug.
+         * Nutzt Fahrtrichtung; Fallback = nächste Station insgesamt.
+         */
+        function findNextStation(lat, lon, heading) {
+            if (sbahnStations.length === 0) {
+                return null;
+            }
+
+            let bestAhead = null;
+            let bestOverall = null;
+
+            for (const station of sbahnStations) {
+                const distanceKm = haversineKm(lat, lon, station.lat, station.lon);
+                if (distanceKm < NEXT_STOP_MIN_DISTANCE_KM) {
+                    continue;
+                }
+                if (distanceKm > NEXT_STOP_MAX_DISTANCE_KM) {
+                    continue;
+                }
+
+                const candidate = { ...station, distanceKm };
+
+                if (!bestOverall || distanceKm < bestOverall.distanceKm) {
+                    bestOverall = candidate;
+                }
+
+                if (Number.isFinite(heading) && isStationAhead(heading, bearingDegrees(lat, lon, station.lat, station.lon))) {
+                    if (!bestAhead || distanceKm < bestAhead.distanceKm) {
+                        bestAhead = candidate;
+                    }
+                }
+            }
+
+            return bestAhead || bestOverall;
+        }
+
+        /** Aktualisiert Anzeige und Karten-Markierung für den nächsten Halt */
+        function updateNextStopDisplay(force = false) {
+            const now = Date.now();
+            if (!force && now - lastNextStopUpdateMs < 400) {
+                return;
+            }
+            lastNextStopUpdateMs = now;
+
+            const statusEl = document.getElementById("next-stop-status");
+            const selfTrain = playerTrains[localPlayerName];
+
+            if (!selfTrain || sbahnStations.length === 0) {
+                statusEl.textContent = "Nächster Halt: –";
+                return;
+            }
+
+            const nextStop = findNextStation(
+                selfTrain.currentLat,
+                selfTrain.currentLon,
+                selfTrain.currentHeading
+            );
+
+            if (!nextStop) {
+                statusEl.textContent = "Nächster Halt: keine Station in Reichweite";
+                setNextStopHighlight(null);
+                return;
+            }
+
+            let text = `Nächster Halt: ${nextStop.name} · ${formatDistance(nextStop.distanceKm)}`;
+
+            if (selfTrain.speedKph > 8) {
+                const etaMinutes = (nextStop.distanceKm / selfTrain.speedKph) * 60;
+                if (etaMinutes < 1) {
+                    text += " · < 1 Min";
+                } else {
+                    text += ` · ~${Math.round(etaMinutes)} Min`;
+                }
+            }
+
+            statusEl.textContent = text;
+            setNextStopHighlight(nextStop.name);
+        }
+
+        /** Hebt die nächste Station auf der Karte orange hervor */
+        function setNextStopHighlight(stationName) {
+            if (highlightedNextStopName === stationName) {
+                return;
+            }
+
+            const prevStation = highlightedNextStopName
+                ? stationByName.get(highlightedNextStopName)
+                : null;
+            const nextStation = stationName ? stationByName.get(stationName) : null;
+
+            if (prevStation) {
+                prevStation.marker.setIcon(createStationIcon(false));
+                refreshStationTooltip(prevStation);
+            }
+            if (nextStation) {
+                nextStation.marker.setIcon(createStationIcon(true));
+                refreshStationTooltip(nextStation);
+            }
+
+            highlightedNextStopName = stationName;
+        }
+
+        function refreshStationTooltip(station) {
+            if (!station) {
+                return;
+            }
+
+            const showLabels = map.getZoom() >= 13;
+            const isNext = station.name === highlightedNextStopName;
+            station.marker.unbindTooltip();
+            station.marker.bindTooltip(
+                isNext ? `${station.name} (nächster Halt)` : station.name,
+                {
+                    permanent: showLabels,
+                    direction: "top",
+                    offset: [0, -12],
+                    className: "station-label",
+                }
+            );
+        }
+
+        // Alle Spieler: { "Spielername": { marker, color, lat, lon, heading, ... } }
+        const playerTrains = {};
+
+        // ===================================================================
+        // Position aktualisieren – Kernfunktion für das Radar
+        // ===================================================================
+
+        function linkTrainIconElement(train) {
+            const root = train.marker.getElement();
+            train.iconInner = root ? root.querySelector(".train-icon-inner") : null;
+        }
+
+        /** Legt einen Spieler-Marker an, falls noch nicht vorhanden */
+        function ensurePlayer(playerName) {
+            if (playerTrains[playerName]) {
+                return playerTrains[playerName];
+            }
+
+            const train = {
+                name: playerName,
+                isSelf: playerName === localPlayerName,
+                color: getPlayerColor(playerName),
+                marker: null,
+                iconInner: null,
+                dimmed: false,
+                currentLat: DEFAULT_CENTER[0],
+                currentLon: DEFAULT_CENTER[1],
+                targetLat: DEFAULT_CENTER[0],
+                targetLon: DEFAULT_CENTER[1],
+                currentHeading: 0,
+                targetHeading: 0,
+                speedKph: 0,
+                isActive: true,
+                offlineSeconds: 0,
+            };
+
+            train.marker = L.marker(
+                [train.currentLat, train.currentLon],
+                { icon: createTrainIcon(train.color, 0), title: playerName, zIndexOffset: train.isSelf ? 200 : 100 }
+            )
+                .addTo(map)
+                .bindPopup(buildTrainPopup(playerName, 0, 0));
+
+            requestAnimationFrame(() => linkTrainIconElement(train));
+
+            playerTrains[playerName] = train;
+            return train;
+        }
+
+        /** Entfernt einen Spieler endgültig von der Karte */
+        function removePlayer(playerName) {
+            const train = playerTrains[playerName];
+            if (!train) {
+                return;
+            }
+
+            map.removeLayer(train.marker);
+            delete playerTrains[playerName];
+        }
+
+        /**
+         * Aktualisiert Position, Geschwindigkeit und Online-Status eines Spielers.
+         */
+        function updatePlayerPosition(playerName, lat, lon, speedKph, heading, isActive, offlineSeconds) {
+            const train = ensurePlayer(playerName);
+
+            train.isActive = isActive !== false;
+            train.offlineSeconds = offlineSeconds || 0;
+
+            if (Number.isFinite(speedKph)) {
+                train.speedKph = speedKph;
+            }
+            if (Number.isFinite(heading)) {
+                train.targetHeading = heading;
+            }
+
+            train.targetLat = lat;
+            train.targetLon = lon;
+
+            const selfTrain = playerTrains[localPlayerName];
+            const distanceKm = (selfTrain && !train.isSelf && train.isActive)
+                ? haversineKm(selfTrain.currentLat, selfTrain.currentLon, lat, lon)
+                : undefined;
+
+            let popup = buildTrainPopup(playerName, train.speedKph, train.targetHeading, distanceKm);
+            if (!train.isActive) {
+                popup += `<br><em>Zuletzt gesehen ${formatLastSeen(train.offlineSeconds)}</em>`;
+            }
+            train.marker.bindPopup(popup);
+
+            if (train.isSelf) {
+                document.getElementById("train-status").textContent =
+                    `Eigener Zug (${localPlayerName}): ${Math.round(train.speedKph)} km/h · ${Math.round(train.targetHeading)}°`;
+                setLed("led-gps", train.isActive ? "ok" : "warn");
+                addRouteTrailPoint(lat, lon);
+
+                if (!hasCenteredOnSelf) {
+                    hasCenteredOnSelf = true;
+                    if (followSelfEnabled) {
+                        map.setView([lat, lon], TRACKING_ZOOM);
+                    }
+                } else if (followSelfEnabled) {
+                    const center = map.getCenter();
+                    const panDist = haversineKm(center.lat, center.lng, lat, lon);
+                    if (panDist > 0.03) {
+                        map.panTo([lat, lon], {
+                            animate: panDist < 1.5,
+                            duration: 0.35,
+                            noMoveStart: true,
+                        });
+                    }
+                }
+
+                updateNextStopDisplay(true);
+            }
+        }
+
+        /** Spielerliste mit Entfernungen im Info-Panel aktualisieren */
+        function updatePlayersPanel() {
+            const listEl = document.getElementById("players-list");
+            const selfTrain = playerTrains[localPlayerName];
+            const names = Object.keys(playerTrains).sort();
+
+            const onlineCount = names.filter((n) => playerTrains[n].isActive).length;
+
+            if (names.length === 0) {
+                listEl.innerHTML = "<p class='status'>Keine Spieler bekannt</p>";
+                return;
+            }
+
+            let html = `<p class="status"><strong>${onlineCount} online</strong> · ${names.length} gesamt</p>`;
+
+            for (const name of names) {
+                const train = playerTrains[name];
+                const offlineClass = train.isActive ? "" : " player-row-offline";
+                let line = `<div class="player-row${offlineClass}">
+                    <span class="player-dot" style="background:${train.color}"></span>
+                    <span>${name}${train.isSelf ? " (du)" : ""}`;
+
+                if (train.isActive) {
+                    line += ` · ${Math.round(train.speedKph)} km/h`;
+                } else {
+                    line += ` · offline · ${formatLastSeen(train.offlineSeconds)}`;
+                }
+
+                if (selfTrain && !train.isSelf && train.isActive) {
+                    const dist = haversineKm(
+                        selfTrain.currentLat, selfTrain.currentLon,
+                        train.currentLat, train.currentLon
+                    );
+                    line += ` · ${formatDistance(dist)} entfernt`;
+                }
+
+                line += "</span></div>";
+                html += line;
+            }
+
+            listEl.innerHTML = html;
+        }
+
+        // ===================================================================
+        // Flüssige Marker-Animation (Interpolation pro Frame)
+        // ===================================================================
+
+        /** Wie schnell sich Marker der Zielposition annähern (0–1, höher = schneller) */
+        const SMOOTH_FACTOR = 0.18;
+
+        /**
+         * Bewegt alle Marker weich Richtung ihrer Zielposition.
+         * Rotation per CSS – kein setIcon() pro Frame (Performance).
+         */
+        function animateMarkers() {
+            for (const train of Object.values(playerTrains)) {
+                const dLat = train.targetLat - train.currentLat;
+                const dLon = train.targetLon - train.currentLon;
+
+                if (Math.abs(dLat) > 1e-7 || Math.abs(dLon) > 1e-7) {
+                    train.currentLat += dLat * SMOOTH_FACTOR;
+                    train.currentLon += dLon * SMOOTH_FACTOR;
+                    train.marker.setLatLng([train.currentLat, train.currentLon]);
+                }
+
+                const dHeading = shortestAngleDelta(train.currentHeading, train.targetHeading);
+                if (Math.abs(dHeading) > 0.3) {
+                    train.currentHeading += dHeading * SMOOTH_FACTOR;
+                    if (train.iconInner) {
+                        train.iconInner.style.transform = `rotate(${train.currentHeading}deg)`;
+                    }
+                }
+
+                const dimmed = !train.isActive;
+                if (dimmed !== train.dimmed) {
+                    train.dimmed = dimmed;
+                    train.marker.setIcon(createTrainIcon(train.color, train.currentHeading, dimmed));
+                    requestAnimationFrame(() => linkTrainIconElement(train));
+                }
+            }
+
+            requestAnimationFrame(animateMarkers);
+        }
+
+        // Animations-Schleife starten
+        animateMarkers();
+
+        // Nächster Halt nur 1×/s berechnen (nicht pro Animations-Frame)
+        setInterval(() => {
+            if (playerTrains[localPlayerName]) {
+                updateNextStopDisplay();
+            }
+        }, 1000);
+
+        // ===================================================================
+        // Live-Daten vom Radar-Server (echte GPS-Koordinaten aus dem Spiel)
+        // ===================================================================
+
+        const API_URL = "/api/positions";
+        let socketLive = false;
+        const lastServerState = new Map();
+
+        /** Wendet Spielerdaten auf die Karte an (REST oder WebSocket) */
+        function applyPositionsFromServer(players) {
+            const knownNames = new Set();
+            let panelNeedsUpdate = false;
+
+            for (const player of players) {
+                knownNames.add(player.player);
+
+                const prev = lastServerState.get(player.player);
+                const isActive = player.active !== false;
+                const unchanged = prev
+                    && Math.abs(prev.lat - player.lat) < 1e-6
+                    && Math.abs(prev.lon - player.lon) < 1e-6
+                    && prev.speed_kph === player.speed_kph
+                    && prev.heading === player.heading
+                    && prev.active === isActive
+                    && prev.offline_seconds === (player.offline_seconds || 0);
+
+                if (unchanged) {
+                    continue;
+                }
+
+                lastServerState.set(player.player, {
+                    lat: player.lat,
+                    lon: player.lon,
+                    speed_kph: player.speed_kph,
+                    heading: player.heading,
+                    active: isActive,
+                    offline_seconds: player.offline_seconds || 0,
+                });
+
+                updatePlayerPosition(
+                    player.player,
+                    player.lat,
+                    player.lon,
+                    player.speed_kph,
+                    player.heading,
+                    isActive,
+                    player.offline_seconds || 0
+                );
+                panelNeedsUpdate = true;
+            }
+
+            for (const name of Object.keys(playerTrains)) {
+                if (!knownNames.has(name)) {
+                    removePlayer(name);
+                    lastServerState.delete(name);
+                    panelNeedsUpdate = true;
+                }
+            }
+
+            if (panelNeedsUpdate) {
+                updatePlayersPanel();
+            }
+        }
+
+        async function fetchPositionsFromServer() {
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                applyPositionsFromServer(await response.json());
+                setLed("led-server", "ok");
+                if (!socketLive) {
+                    document.getElementById("connection-status").textContent =
+                        "Verbunden (REST)";
+                    setLed("led-live", "warn");
+                }
+            } catch (error) {
+                console.warn("REST-Fallback fehlgeschlagen:", error.message);
+                document.getElementById("connection-status").textContent =
+                    "Keine Verbindung zum Server – start_radar.bat ausführen";
+                setLed("led-server", "err");
+                setLed("led-live", "err");
+            }
+        }
+
+        // Sofort REST laden (funktioniert auch ohne WebSocket)
+        fetchPositionsFromServer();
+
+        // WebSocket – sofortige Updates wenn ein Tracker sendet
+        if (typeof io !== "undefined") {
+            const socket = io();
+
+            socket.on("connect", () => {
+                socketLive = true;
+                document.getElementById("connection-status").textContent =
+                    "Live verbunden (WebSocket)";
+                setLed("led-server", "ok");
+                setLed("led-live", "ok");
+            });
+
+            socket.on("disconnect", () => {
+                socketLive = false;
+                document.getElementById("connection-status").textContent =
+                    "Getrennt – nutze REST-Fallback";
+                setLed("led-live", "warn");
+            });
+
+            socket.on("positions_update", (players) => {
+                applyPositionsFromServer(players);
+            });
+        } else {
+            document.getElementById("connection-status").textContent =
+                "REST-Modus (WebSocket-Skript fehlt)";
+            setLed("led-live", "warn");
+        }
+
+        // REST-Fallback alle 10 s falls WebSocket ausfällt
+        setInterval(() => {
+            if (!socketLive) {
+                fetchPositionsFromServer();
+            }
+        }, 10000);
+
+        // ===================================================================
+        // S-Bahn-Linien (Phase 3 – Streckenverlauf aus OpenStreetMap)
+        // ===================================================================
+
+        const LINES_API = "/api/lines/sbahn";
+
+        /**
+         * Zeichnet farbige S-Bahn-Strecken auf der Karte (gestaffelt, Canvas-Renderer).
+         */
+        async function fetchLinesFromServer() {
+            const response = await fetch(LINES_API);
+            const data = await response.json();
+
+            if (response.status === 503 && data.loading) {
+                return { loading: true, message: data.message || "Linien werden geladen …" };
+            }
+            if (!response.ok) {
+                throw new Error(data.error || `HTTP ${response.status}`);
+            }
+            if (!Array.isArray(data)) {
+                throw new Error("Ungültige Linien-Daten vom Server");
+            }
+            return { loading: false, lines: data };
+        }
+
+        async function loadSBahnLines() {
+            const statusEl = document.getElementById("lines-status");
+            let lines = null;
+
+            while (!lines) {
+                try {
+                    const result = await fetchLinesFromServer();
+                    if (result.loading) {
+                        statusEl.textContent = result.message;
+                        await new Promise((resolve) => setTimeout(resolve, 2500));
+                        continue;
+                    }
+                    lines = result.lines;
+                } catch (error) {
+                    statusEl.textContent = "S-Bahn-Linien: erneuter Versuch …";
+                    console.warn("Linien-Fehler:", error.message);
+                    await new Promise((resolve) => setTimeout(resolve, 4000));
+                }
+            }
+
+            try {
+                linesDataCache = lines;
+                linesLayer.clearLayers();
+                linesDrawn = false;
+
+                const uniqueLines = new Set(lines.map((segment) => segment.line));
+                const seenTooltip = new Set();
+                let index = 0;
+                const BATCH_SIZE = 100;
+
+                function drawLineBatch() {
+                    const end = Math.min(index + BATCH_SIZE, lines.length);
+
+                    for (; index < end; index++) {
+                        const segment = lines[index];
+                        const polyline = L.polyline(segment.coordinates, {
+                            color: segment.color,
+                            weight: 4,
+                            opacity: 0.75,
+                            lineCap: "round",
+                            lineJoin: "round",
+                            interactive: false,
+                            renderer: lineCanvasRenderer,
+                        });
+
+                        if (!seenTooltip.has(segment.line)) {
+                            seenTooltip.add(segment.line);
+                            polyline.bindTooltip(segment.line, {
+                                sticky: true,
+                                className: "station-label",
+                            });
+                        }
+
+                        linesLayer.addLayer(polyline);
+                    }
+
+                    if (index < lines.length) {
+                        statusEl.textContent = `Lade S-Bahn-Linien … ${Math.round((index / lines.length) * 100)} %`;
+                        requestAnimationFrame(drawLineBatch);
+                    } else {
+                        linesDrawn = true;
+                        updateLinesVisibility();
+                        if (map.getZoom() >= linesMinZoom) {
+                            statusEl.textContent = `${uniqueLines.size} S-Bahn-Linien geladen`;
+                        } else {
+                            statusEl.textContent = `${uniqueLines.size} Linien · ab Zoom ${linesMinZoom} sichtbar`;
+                        }
+                    }
+                }
+
+                if (lines.length === 0) {
+                    statusEl.textContent = "Keine S-Bahn-Linien gefunden";
+                } else {
+                    requestAnimationFrame(drawLineBatch);
+                }
+            } catch (error) {
+                statusEl.textContent = "S-Bahn-Linien konnten nicht geladen werden";
+                console.error("Linien-Fehler:", error);
+            }
+        }
+
+        loadSBahnLines();
+
+        // ===================================================================
+        // S-Bahn-Stationen (OpenStreetMap via Radar-Server)
+        // ===================================================================
+
+        const stationLayer = L.layerGroup().addTo(map);
+        const STATIONS_API = "/api/stations/sbahn";
+
+        /** Icon für S-Bahn-Haltestellen */
+        function createStationIcon(isNextStop = false) {
+            const extraClass = isNextStop ? " next-stop" : "";
+            return L.divIcon({
+                className: "",
+                html: `<div class="sbahn-station-icon${extraClass}">S</div>`,
+                iconSize: [22, 22],
+                iconAnchor: [11, 11],
+            });
+        }
+
+        /**
+         * Zeigt Stationsnamen ab Zoom-Level 13 dauerhaft an.
+         */
+        function updateStationLabelVisibility() {
+            const showLabels = map.getZoom() >= 13;
+
+            for (const station of sbahnStations) {
+                const isNext = station.name === highlightedNextStopName;
+                station.marker.unbindTooltip();
+                station.marker.bindTooltip(
+                    isNext ? `${station.name} (nächster Halt)` : station.name,
+                    {
+                        permanent: showLabels,
+                        direction: "top",
+                        offset: [0, -12],
+                        className: "station-label",
+                    }
+                );
+            }
+        }
+
+        /**
+         * Lädt S-Bahn-Stationen und zeichnet sie auf der Karte.
+         */
+        async function loadSBahnStations() {
+            const statusEl = document.getElementById("station-status");
+
+            try {
+                const response = await fetch(STATIONS_API);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const stations = await response.json();
+                stationLayer.clearLayers();
+                sbahnStations.length = 0;
+                stationByName.clear();
+                highlightedNextStopName = null;
+
+                for (const station of stations) {
+                    const marker = L.marker([station.lat, station.lon], {
+                        icon: createStationIcon(false),
+                        zIndexOffset: -100,
+                    });
+
+                    marker.stationName = station.name;
+                    marker.bindPopup(`<strong>${station.name}</strong><br>S-Bahn-Station`);
+                    stationLayer.addLayer(marker);
+
+                    const entry = {
+                        name: station.name,
+                        lat: station.lat,
+                        lon: station.lon,
+                        marker,
+                    };
+                    sbahnStations.push(entry);
+                    stationByName.set(station.name, entry);
+                }
+
+                statusEl.textContent = `${stations.length} S-Bahn-Stationen geladen`;
+                updateStationLabelVisibility();
+                updateNextStopDisplay();
+            } catch (error) {
+                statusEl.textContent = "S-Bahn-Stationen konnten nicht geladen werden";
+                console.error("Stationen-Fehler:", error);
+            }
+        }
+
+        map.on("zoomend", updateStationLabelVisibility);
+        loadSBahnStations();
+    </script>
+</body>
+</html>

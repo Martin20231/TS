@@ -1,0 +1,10 @@
+{
+  "player_name": "DeinName",
+  "server_port": 8080,
+  "server_host": "0.0.0.0",
+  "poll_interval_seconds": 1.0,
+  "raildriver_dll_path": "E:\\Steam\\steamapps\\common\\RailWorks\\plugins\\RailDriver64.dll",
+  "server_url": "https://DEIN-SERVICE.onrender.com/api/position",
+  "lines_min_zoom": 10,
+  "route_trail_minutes": 30
+}
