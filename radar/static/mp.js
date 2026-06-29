@@ -97,11 +97,14 @@
         `;
 
         for (const m of members) {
-            const dot = m.active ? "🟢" : "⚪";
+            const badge = m.active
+                ? '<span class="badge badge-live">Live</span>'
+                : '<span class="badge badge-off">Offline</span>';
+            const roleLabel = m.role === "dispatch" ? "Leitstand" : "Lokführer";
             html += `<div class="mp-member-row">
-                ${dot} <strong>${m.player}</strong>
+                ${badge} <strong>${m.player}</strong>
                 ${m.player === playerName() ? "(du)" : ""}
-                · ${m.role === "dispatch" ? "Leitstand" : "Lokführer"}
+                · ${roleLabel}
                 ${m.loco ? `· ${m.loco}` : ""}
                 ${m.active ? `· ${Math.round(m.speed_kph)} km/h` : ""}
             </div>`;
@@ -304,6 +307,15 @@
 
     function updateGhostTrails(trails) {
         if (typeof map === "undefined" || !trails) return;
+
+        const activePlayers = new Set(Object.keys(trails));
+        for (const player of ghostLayers.keys()) {
+            if (!activePlayers.has(player)) {
+                map.removeLayer(ghostLayers.get(player));
+                ghostLayers.delete(player);
+            }
+        }
+
         for (const [player, points] of Object.entries(trails)) {
             if (player === playerName() || !points?.length) continue;
             const latlngs = points.map((p) => [p.lat, p.lon]);

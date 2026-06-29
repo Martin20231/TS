@@ -20,412 +20,26 @@
     <!-- Socket.IO – vom Radar-Server (passende Version, kein CDN nötig) -->
     <script src="/socket.io/socket.io.js"></script>
 
-    <style>
-        /* Vollbild-Karte ohne Ränder */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        html, body, #map {
-            width: 100%;
-            height: 100%;
-        }
-
-        /* Status-LEDs */
-        #status-leds {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin: 8px 0;
-            padding: 8px 0;
-            border-top: 1px solid #e5e7eb;
-            border-bottom: 1px solid #e5e7eb;
-        }
-
-        .led-item {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 11px;
-            font-weight: 600;
-            color: #374151;
-        }
-
-        .led {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #d1d5db;
-            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
-            flex-shrink: 0;
-        }
-
-        .led.ok { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.55); }
-        .led.warn { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.55); }
-        .led.err { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.55); }
-
-        .help-box {
-            margin-top: 10px;
-            font-size: 12px;
-            color: #4b5563;
-            line-height: 1.45;
-        }
-
-        .help-box summary {
-            cursor: pointer;
-            font-weight: 600;
-            color: #1d4ed8;
-            margin-bottom: 6px;
-        }
-
-        .help-box ol {
-            margin: 6px 0 0 18px;
-        }
-
-        .help-box li {
-            margin-bottom: 4px;
-        }
-
-        .help-url {
-            display: block;
-            margin-top: 6px;
-            padding: 6px 8px;
-            background: #f1f5f9;
-            border-radius: 6px;
-            font-family: Consolas, monospace;
-            font-size: 11px;
-            word-break: break-all;
-            user-select: all;
-        }
-
-        #info-panel .subtitle {
-            font-size: 12px;
-            color: #6b7280;
-            margin-bottom: 4px;
-        }
-
-        #panel-toggle {
-            position: absolute;
-            top: 12px;
-            left: 12px;
-            z-index: 1001;
-            display: none;
-        }
-
-        #info-panel.collapsed {
-            padding: 8px 12px;
-        }
-
-        #info-panel.collapsed .panel-body {
-            display: none;
-        }
-
-        body.dark-mode #status-leds {
-            border-color: #444;
-        }
-
-        body.dark-mode .led-item {
-            color: #d1d5db;
-        }
-
-        body.dark-mode .help-box {
-            color: #bbb;
-        }
-
-        body.dark-mode .help-box summary {
-            color: #60a5fa;
-        }
-
-        body.dark-mode .help-url {
-            background: #2a2a2a;
-            color: #e5e5e5;
-        }
-
-        body.dark-mode .subtitle {
-            color: #9ca3af !important;
-        }
-
-        /* Info-Leiste oben links */
-        #info-panel {
-            position: absolute;
-            top: 12px;
-            left: 12px;
-            z-index: 1000;
-            background: rgba(255, 255, 255, 0.92);
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-family: "Segoe UI", sans-serif;
-            font-size: 14px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        }
-
-        #info-panel h1 {
-            font-size: 16px;
-            margin-bottom: 6px;
-        }
-
-        #info-panel .status {
-            margin-top: 6px;
-            font-size: 12px;
-            color: #555;
-        }
-
-        #players-list {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid #ddd;
-            max-height: 140px;
-            overflow-y: auto;
-        }
-
-        .player-row {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            margin-bottom: 4px;
-        }
-
-        .player-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-
-        /* S-Bahn-Stationen: grünes S-Icon */
-        .sbahn-station-icon {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 22px;
-            height: 22px;
-            background: #00843d;
-            color: white;
-            font-weight: bold;
-            font-size: 11px;
-            font-family: "Segoe UI", sans-serif;
-            border: 2px solid white;
-            border-radius: 4px;
-            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
-        }
-
-        .station-label {
-            background: rgba(255, 255, 255, 0.9) !important;
-            border: 1px solid #00843d !important;
-            color: #1a1a1a !important;
-            font-size: 11px !important;
-            font-weight: 600 !important;
-            padding: 2px 6px !important;
-            border-radius: 4px !important;
-        }
-
-        /* Zug-Marker mit Fahrtrichtung (Pfeil nach oben = Norden) */
-        .train-icon-inner {
-            width: 26px;
-            height: 26px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transform-origin: center center;
-            will-change: transform;
-            filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.45));
-        }
-
-        .train-icon-shape {
-            width: 0;
-            height: 0;
-            border-left: 7px solid transparent;
-            border-right: 7px solid transparent;
-            border-bottom: 16px solid var(--train-color, #2563eb);
-        }
-
-        /* Nächster Halt – Station hervorgehoben */
-        .sbahn-station-icon.next-stop {
-            background: #f59e0b;
-            border-color: #fff;
-            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.45);
-            transform: scale(1.15);
-        }
-
-        #next-stop-status {
-            font-weight: 600;
-            color: #1d4ed8;
-        }
-
-        /* Steuerungs-Buttons */
-        #controls {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin: 8px 0;
-        }
-
-        .ctrl-btn {
-            font-family: "Segoe UI", sans-serif;
-            font-size: 12px;
-            padding: 5px 10px;
-            border: 1px solid #ccc;
-            border-radius: 6px;
-            background: #f8fafc;
-            cursor: pointer;
-        }
-
-        .ctrl-btn:hover {
-            background: #e2e8f0;
-        }
-
-        .ctrl-btn.active {
-            background: #2563eb;
-            color: white;
-            border-color: #1d4ed8;
-        }
-
-        .player-row-offline {
-            opacity: 0.55;
-            font-style: italic;
-        }
-
-        .train-icon-inner.dimmed {
-            opacity: 0.45;
-            filter: grayscale(0.8) drop-shadow(0 1px 2px rgba(0,0,0,0.3));
-        }
-
-        /* Dark Mode */
-        body.dark-mode #info-panel {
-            background: rgba(30, 30, 30, 0.92);
-            color: #e5e5e5;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-        }
-
-        body.dark-mode #info-panel .status {
-            color: #aaa;
-        }
-
-        body.dark-mode #next-stop-status {
-            color: #60a5fa;
-        }
-
-        body.dark-mode #players-list {
-            border-top-color: #444;
-        }
-
-        body.dark-mode .ctrl-btn {
-            background: #333;
-            color: #eee;
-            border-color: #555;
-        }
-
-        body.dark-mode .ctrl-btn:hover {
-            background: #444;
-        }
-
-        body.dark-mode .ctrl-btn.active {
-            background: #3b82f6;
-            border-color: #2563eb;
-        }
-
-        body.dark-mode .station-label {
-            background: rgba(40, 40, 40, 0.92) !important;
-            color: #eee !important;
-            border-color: #00843d !important;
-        }
-
-        /* Multiplayer-Tabs */
-        #mp-tabs {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 4px;
-            margin-bottom: 8px;
-        }
-
-        .mp-tab {
-            font-size: 11px;
-            font-weight: 700;
-            padding: 7px 4px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            background: #f8fafc;
-            cursor: pointer;
-        }
-
-        .mp-tab.active {
-            background: #2563eb;
-            color: #fff;
-            border-color: #1d4ed8;
-        }
-
-        .mp-tab-panel.hidden { display: none; }
-
-        .mp-field {
-            display: block;
-            font-size: 11px;
-            margin: 8px 0;
-            color: #374151;
-        }
-
-        .mp-field input, .mp-field select {
-            display: block;
-            width: 100%;
-            margin-top: 4px;
-            padding: 6px 8px;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            font-size: 12px;
-        }
-
-        .mp-copy {
-            width: 100%;
-            font-size: 10px;
-            padding: 6px;
-            margin: 6px 0;
-            border-radius: 6px;
-            border: 1px solid #e5e7eb;
-        }
-
-        .mp-hr { border: none; border-top: 1px solid #e5e7eb; margin: 10px 0; }
-        .mp-member-list, .mp-msg-list { max-height: 100px; overflow-y: auto; margin: 8px 0; font-size: 12px; }
-        .mp-member-row, .mp-convoy-row, .mp-score-row { margin: 4px 0; }
-        .mp-msg { margin: 4px 0; padding: 4px 0; border-bottom: 1px solid #f1f5f9; }
-        .mp-actions, .mp-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-        .mp-quick-btn { font-size: 11px !important; padding: 5px 8px !important; }
-
-        #mp-toast {
-            position: fixed;
-            bottom: 16px;
-            left: 50%;
-            transform: translateX(-50%) translateY(120%);
-            background: #1e293b;
-            color: #fff;
-            padding: 10px 16px;
-            border-radius: 8px;
-            font-size: 13px;
-            z-index: 2000;
-            transition: transform 0.25s ease;
-            max-width: 90vw;
-        }
-
-        #mp-toast.visible { transform: translateX(-50%) translateY(0); }
-
-        body.dark-mode .mp-tab { background: #333; border-color: #555; color: #eee; }
-        body.dark-mode .mp-tab.active { background: #3b82f6; }
-        body.dark-mode .mp-field { color: #ddd; }
-        body.dark-mode .mp-field input, body.dark-mode .mp-field select {
-            background: #2a2a2a; color: #eee; border-color: #555;
-        }
-
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-
     <!-- Info-Panel -->
     <div id="info-panel">
-        <h1 id="panel-title">TS Multiplayer-Radar</h1>
-        <p class="subtitle" id="panel-subtitle">Live-Karte · Session · Leitstand</p>
-        <p class="status" id="mp-session-status">Keine Session</p>
-        <p class="status" id="mp-convoy-status"></p>
+        <div class="panel-header">
+            <div class="brand">
+                <div class="brand-icon" aria-hidden="true">🚆</div>
+                <div class="brand-text">
+                    <h1 id="panel-title">TS Multiplayer-Radar</h1>
+                    <p class="subtitle" id="panel-subtitle">Live-Karte · Session · Leitstand</p>
+                </div>
+            </div>
+            <button type="button" id="btn-panel-toggle" title="Panel ein-/ausklappen" aria-expanded="true">−</button>
+        </div>
+        <div class="panel-subline">
+            <span id="mp-session-status">Keine Session</span>
+            <span id="mp-convoy-status"></span>
+        </div>
 
         <div id="mp-tabs">
             <button type="button" class="mp-tab active" data-tab="map">Karte</button>
@@ -479,6 +93,29 @@
 
     <div id="mp-toast"></div>
 
+    <!-- HUD unten auf der Karte -->
+    <div id="map-hud" aria-live="polite">
+        <div class="hud-block">
+            <div class="hud-value accent" id="hud-speed">–</div>
+            <div class="hud-label">km/h</div>
+        </div>
+        <div class="hud-block">
+            <div class="hud-value" id="hud-heading">–</div>
+            <div class="hud-label">Richtung</div>
+        </div>
+        <div class="hud-block">
+            <div class="hud-value" id="hud-stop">–</div>
+            <div class="hud-label" id="hud-stop-label">Nächster Halt</div>
+        </div>
+    </div>
+
+    <div id="map-legend" aria-hidden="true">
+        <div class="legend-item"><span class="legend-swatch" style="background:#38bdf8"></span> Dein Zug</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#4ade80"></span> S-Bahn-Halt</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#fbbf24"></span> Nächster Halt</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#a855f7"></span> S-Bahn-Linien</div>
+    </div>
+
     <!-- Karten-Container -->
     <div id="map"></div>
 
@@ -499,7 +136,7 @@
             "#dc2626", "#ea580c", "#ca8a04", "#7c3aed",
             "#db2777", "#0891b2", "#4f46e5", "#16a34a",
         ];
-        const SELF_COLOR = "#2563eb";
+        const SELF_COLOR = "#38bdf8";
 
         // Startzentrum (wird beim ersten echten GPS-Signal ersetzt)
         const DEFAULT_CENTER = [52.52, 13.405];
@@ -610,9 +247,9 @@
 
             if (!routeTrailLine) {
                 routeTrailLine = L.polyline(routeTrailPoints, {
-                    color: "#2563eb",
-                    weight: 4,
-                    opacity: 0.45,
+                    color: "#38bdf8",
+                    weight: 5,
+                    opacity: 0.55,
                     interactive: false,
                     renderer: lineCanvasRenderer,
                 }).addTo(map);
@@ -650,10 +287,10 @@
 
         loadRadarConfig();
 
-        // Karten-Layer: Hell (OSM) und Dunkel (CartoDB)
-        const lightTiles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        // Karten-Layer: Hell (Carto Voyager) und Dunkel (Carto Dark)
+        const lightTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
             maxZoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
         });
 
         const darkTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
@@ -661,27 +298,23 @@
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
         });
 
-        let isDarkMode = localStorage.getItem("radar-dark-mode") === "true";
+        let isDarkMode = localStorage.getItem("radar-dark-mode") !== "false";
         let activeTileLayer = isDarkMode ? darkTiles : lightTiles;
-        activeTileLayer.addTo(map);
-
-        if (isDarkMode) {
-            document.body.classList.add("dark-mode");
-        }
 
         /** Wechselt zwischen Hell- und Dunkelkarte */
         function setDarkMode(enabled) {
             isDarkMode = enabled;
             localStorage.setItem("radar-dark-mode", enabled ? "true" : "false");
-            document.body.classList.toggle("dark-mode", enabled);
+            document.body.classList.toggle("light-mode", !enabled);
 
             map.removeLayer(activeTileLayer);
             activeTileLayer = enabled ? darkTiles : lightTiles;
             activeTileLayer.addTo(map);
             activeTileLayer.bringToBack();
 
-            document.getElementById("btn-dark").classList.toggle("active", enabled);
-            document.getElementById("btn-dark").textContent = enabled ? "Dark Mode an" : "Dark Mode";
+            const btnDark = document.getElementById("btn-dark");
+            btnDark.classList.toggle("active", enabled);
+            btnDark.textContent = enabled ? "Hell" : "Dunkel";
         }
 
         /** Kamera-Follow ein/aus */
@@ -703,6 +336,15 @@
             setTrailEnabled(!trailEnabled);
         });
 
+        const infoPanel = document.getElementById("info-panel");
+        const panelToggle = document.getElementById("btn-panel-toggle");
+        if (panelToggle && infoPanel) {
+            panelToggle.addEventListener("click", () => {
+                const collapsed = infoPanel.classList.toggle("collapsed");
+                panelToggle.textContent = collapsed ? "+" : "−";
+                panelToggle.setAttribute("aria-expanded", String(!collapsed));
+            });
+        }
 
         // Beim manuellen Verschieben der Karte Follow deaktivieren
         map.on("dragstart", () => setFollowSelf(false));
@@ -722,15 +364,18 @@
          * @param {number} heading - Richtung in Grad (0 = Norden)
          * @returns {L.DivIcon} Leaflet-Icon
          */
-        function createTrainIcon(color, heading = 0, dimmed = false) {
-            const dimClass = dimmed ? " dimmed" : "";
+        function createTrainIcon(color, heading = 0, dimmed = false, isSelf = false) {
+            const classes = `train-marker${dimmed ? " dimmed" : ""}${isSelf ? " is-self" : ""}`;
             return L.divIcon({
                 className: "",
-                html: `<div class="train-icon-inner${dimClass}" style="transform: rotate(${heading}deg);">
-                    <div class="train-icon-shape" style="--train-color: ${color};"></div>
+                html: `<div class="${classes}" style="--marker-color: ${color}; transform: rotate(${heading}deg);">
+                    <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M16 4 L26 26 L16 22 L6 26 Z" fill="${color}" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+                        <circle cx="16" cy="14" r="3.5" fill="white" opacity="0.9"/>
+                    </svg>
                 </div>`,
-                iconSize: [26, 26],
-                iconAnchor: [13, 13],
+                iconSize: [32, 32],
+                iconAnchor: [16, 16],
             });
         }
 
@@ -746,11 +391,11 @@
         function buildTrainPopup(label, speedKph, heading, distanceKm) {
             const speed = Number.isFinite(speedKph) ? `${Math.round(speedKph)} km/h` : "– km/h";
             const direction = Number.isFinite(heading) ? `${Math.round(heading)}°` : "–°";
-            let text = `<strong>${label}</strong><br>${speed} · Richtung ${direction}`;
+            let meta = `${speed} · Richtung ${direction}`;
             if (Number.isFinite(distanceKm)) {
-                text += `<br>Entfernung: ${formatDistance(distanceKm)}`;
+                meta += ` · ${formatDistance(distanceKm)} entfernt`;
             }
-            return text;
+            return `<div class="popup-title">${label}</div><div class="popup-meta">${meta}</div>`;
         }
 
         /** Farbe pro Spieler – eigener Zug immer blau, andere per Name-Hash */
@@ -869,6 +514,7 @@
 
             if (!selfTrain || sbahnStations.length === 0) {
                 statusEl.textContent = "Nächster Halt: –";
+                updateMapHud(selfTrain?.speedKph, selfTrain?.currentHeading, null);
                 return;
             }
 
@@ -881,6 +527,7 @@
             if (!nextStop) {
                 statusEl.textContent = "Nächster Halt: keine Station in Reichweite";
                 setNextStopHighlight(null);
+                updateMapHud(selfTrain.speedKph, selfTrain.currentHeading, null);
                 return;
             }
 
@@ -897,6 +544,7 @@
 
             statusEl.textContent = text;
             setNextStopHighlight(nextStop.name);
+            updateMapHud(selfTrain.speedKph, selfTrain.currentHeading, nextStop);
         }
 
         /** Hebt die nächste Station auf der Karte orange hervor */
@@ -948,9 +596,32 @@
         // Position aktualisieren – Kernfunktion für das Radar
         // ===================================================================
 
+        function updateMapHud(speedKph, heading, nextStop) {
+            const hudSpeed = document.getElementById("hud-speed");
+            const hudHeading = document.getElementById("hud-heading");
+            const hudStop = document.getElementById("hud-stop");
+            const hudStopLabel = document.getElementById("hud-stop-label");
+
+            if (hudSpeed) {
+                hudSpeed.textContent = Number.isFinite(speedKph) ? Math.round(speedKph) : "–";
+            }
+            if (hudHeading) {
+                hudHeading.textContent = Number.isFinite(heading) ? `${Math.round(heading)}°` : "–";
+            }
+            if (nextStop !== undefined && hudStop && hudStopLabel) {
+                if (nextStop) {
+                    hudStop.textContent = formatDistance(nextStop.distanceKm);
+                    hudStopLabel.textContent = nextStop.name;
+                } else {
+                    hudStop.textContent = "–";
+                    hudStopLabel.textContent = "Nächster Halt";
+                }
+            }
+        }
+
         function linkTrainIconElement(train) {
             const root = train.marker.getElement();
-            train.iconInner = root ? root.querySelector(".train-icon-inner") : null;
+            train.iconInner = root ? root.querySelector(".train-marker") : null;
         }
 
         /** Legt einen Spieler-Marker an, falls noch nicht vorhanden */
@@ -979,7 +650,7 @@
 
             train.marker = L.marker(
                 [train.currentLat, train.currentLon],
-                { icon: createTrainIcon(train.color, 0), title: playerName, zIndexOffset: train.isSelf ? 200 : 100 }
+                { icon: createTrainIcon(train.color, 0, false, train.isSelf), title: playerName, zIndexOffset: train.isSelf ? 200 : 100 }
             )
                 .addTo(map)
                 .bindPopup(buildTrainPopup(playerName, 0, 0));
@@ -999,12 +670,30 @@
 
             map.removeLayer(train.marker);
             delete playerTrains[playerName];
+
+            if (playerName === localPlayerName) {
+                hasCenteredOnSelf = false;
+                setLed("led-gps", "err");
+                document.getElementById("train-status").textContent =
+                    `Eigener Zug (${localPlayerName}): nicht verbunden`;
+                updateMapHud(undefined, undefined, null);
+                if (routeTrailLine) {
+                    map.removeLayer(routeTrailLine);
+                    routeTrailLine = null;
+                    routeTrailPoints.length = 0;
+                }
+            }
         }
 
         /**
          * Aktualisiert Position, Geschwindigkeit und Online-Status eines Spielers.
          */
         function updatePlayerPosition(playerName, lat, lon, speedKph, heading, isActive, offlineSeconds) {
+            if (isActive === false) {
+                removePlayer(playerName);
+                return;
+            }
+
             const train = ensurePlayer(playerName);
 
             train.isActive = isActive !== false;
@@ -1026,9 +715,6 @@
                 : undefined;
 
             let popup = buildTrainPopup(playerName, train.speedKph, train.targetHeading, distanceKm);
-            if (!train.isActive) {
-                popup += `<br><em>Zuletzt gesehen ${formatLastSeen(train.offlineSeconds)}</em>`;
-            }
             train.marker.bindPopup(popup);
 
             if (train.isSelf) {
@@ -1036,6 +722,7 @@
                     `Eigener Zug (${localPlayerName}): ${Math.round(train.speedKph)} km/h · ${Math.round(train.targetHeading)}°`;
                 setLed("led-gps", train.isActive ? "ok" : "warn");
                 addRouteTrailPoint(lat, lon);
+                updateMapHud(train.speedKph, train.targetHeading);
 
                 if (!hasCenteredOnSelf) {
                     hasCenteredOnSelf = true;
@@ -1134,7 +821,7 @@
                 const dimmed = !train.isActive;
                 if (dimmed !== train.dimmed) {
                     train.dimmed = dimmed;
-                    train.marker.setIcon(createTrainIcon(train.color, train.currentHeading, dimmed));
+                    train.marker.setIcon(createTrainIcon(train.color, train.currentHeading, dimmed, train.isSelf));
                     requestAnimationFrame(() => linkTrainIconElement(train));
                 }
             }

@@ -46,8 +46,8 @@ git push -u origin main
 |------|------|
 | Root Directory | `radar` (nur bei Option B) |
 | Build Command | `pip install -r requirements.txt` |
-| Start Command | `gunicorn --worker-class eventlet -w 1 --bind 0.0.0.0:$PORT --timeout 120 server:app` |
-| Health Check | `/api/status` |
+| Start Command | `gunicorn -c gunicorn_config.py server:application` |
+| Health Check | `/api/health` |
 
 4. **Create Web Service** – warten bis „Live“ (grün)
 5. URL notieren, z. B. `https://ts-multiplayer-radar.onrender.com`

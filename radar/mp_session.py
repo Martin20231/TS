@@ -108,6 +108,15 @@ class SessionStore:
         self._player_session[player] = session_id
         return session
 
+    def on_player_disconnect(self, player: str) -> str | None:
+        """Räumt Ghost-Trail auf, wenn der Tracker nicht mehr sendet."""
+        session_id = self._player_session.get(player)
+        if session_id:
+            session = self._sessions.get(session_id)
+            if session:
+                session.trails.pop(player, None)
+        return session_id
+
     def set_ready(self, session_id: str, player: str, ready: bool) -> bool:
         session = self.get(session_id)
         if session is None or player not in session.members:

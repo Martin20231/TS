@@ -325,6 +325,21 @@ def read_gps_coordinates(dll: ctypes.CDLL) -> tuple[float, float]:
 # Server-Kommunikation (Platzhalter)
 # ---------------------------------------------------------------------------
 
+def remove_position_from_server(
+    player_name: str,
+    server_url: str,
+    session: requests.Session | None = None,
+) -> None:
+    """Meldet dem Server, dass der Zug nicht mehr auf der Karte erscheinen soll."""
+    http = session or requests
+    try:
+        response = http.delete(server_url, json={"player": player_name}, timeout=3)
+        response.raise_for_status()
+        print(f"[Radar] {player_name} von der Karte entfernt.")
+    except requests.RequestException as error:
+        print(f"Disconnect vom Server fehlgeschlagen: {error}", file=sys.stderr)
+
+
 def send_position_to_server(
     player_name: str,
     server_url: str,
@@ -433,6 +448,9 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
 
     http = create_http_session()
     server_fail_streak = 0
+    had_valid_gps = False
+    gps_lost_streak = 0
+    gps_lost_disconnect_polls = max(3, int(config.get("gps_lost_disconnect_polls", 5)))
 
     try:
         while True:
@@ -442,9 +460,28 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
 
             maintain_connection(dll)
 
-            state = read_train_state(dll, telemetry)
+            try:
+                state = read_train_state(dll, telemetry)
+            except (OSError, ValueError) as error:
+                log(f"[Radar] Simulator nicht erreichbar: {error}")
+                notify("sim", "getrennt")
+                if had_valid_gps:
+                    remove_position_from_server(player_name, server_url, http)
+                    had_valid_gps = False
+                gps_lost_streak += 1
+                if stop_event:
+                    if stop_event.wait(poll_interval):
+                        log("Tracker beendet.")
+                        break
+                else:
+                    time.sleep(poll_interval)
+                continue
 
-            if state["lat"] != 0.0 or state["lon"] != 0.0:
+            valid_gps = state["lat"] != 0.0 or state["lon"] != 0.0
+
+            if valid_gps:
+                had_valid_gps = True
+                gps_lost_streak = 0
                 ok = send_position_to_server(
                     player_name,
                     server_url,
@@ -467,8 +504,15 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
                     + (" · gesendet" if ok else " · Server-Fehler"),
                 )
             else:
+                gps_lost_streak += 1
                 log("[Radar] Noch keine GPS-Daten – bist du in einer aktiven Fahrt?")
                 notify("gps", "warte auf Fahrt …")
+                if had_valid_gps and gps_lost_streak >= gps_lost_disconnect_polls:
+                    remove_position_from_server(player_name, server_url, http)
+                    had_valid_gps = False
+                    gps_lost_streak = 0
+                    log("[Radar] Spielverbindung verloren – Zug von der Karte entfernt.")
+                    notify("sim", "getrennt")
 
             if session_id and server_fail_streak < 3:
                 try:
@@ -505,6 +549,7 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
     except KeyboardInterrupt:
         log("Tracker beendet.")
     finally:
+        remove_position_from_server(player_name, server_url, http)
         http.close()
 
 

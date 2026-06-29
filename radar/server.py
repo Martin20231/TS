@@ -5,9 +5,15 @@ Starten:  start_radar.bat   oder   python server.py
 Karte:    http://localhost:8080
 """
 
+import os
+
+if os.environ.get("RENDER"):
+    from gevent import monkey
+
+    monkey.patch_all()
+
 from pathlib import Path
 import json
-import os
 import socket
 import time
 
@@ -30,10 +36,8 @@ SERVER_HOST = CONFIG["server_host"]
 SERVER_PORT = int(os.environ.get("PORT", CONFIG["server_port"]))
 _background_started = False
 
-# Spieler gelten als offline, wenn länger keine Daten gesendet wurden
+# Spieler verschwinden von der Karte, wenn der Tracker nicht mehr sendet (Spiel beendet / Absturz)
 PLAYER_TIMEOUT_SECONDS = 30
-# „Zuletzt gesehen“-Marker bleiben noch so lange sichtbar
-STALE_PLAYER_SECONDS = 300
 
 # Aktuelle Spielerpositionen: { "Spielername": { lat, lon, speed, heading, ... } }
 positions: dict[str, dict] = {}
@@ -150,23 +154,35 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
-def build_positions_payload(session_id: str | None = None) -> list[dict]:
-    """Baut die Spielerliste für REST und WebSocket."""
+def purge_stale_positions() -> list[tuple[str, str | None]]:
+    """Entfernt Spieler ohne frische Tracker-Daten von der Karte."""
     now = time.time()
+    removed: list[tuple[str, str | None]] = []
+
+    for player, entry in list(positions.items()):
+        if now - entry["timestamp"] >= PLAYER_TIMEOUT_SECONDS:
+            session_id = entry.get("session_id")
+            removed.append((player, session_id))
+            del positions[player]
+            SESSIONS.on_player_disconnect(player)
+
+    return removed
+
+
+def build_positions_payload(session_id: str | None = None) -> list[dict]:
+    """Baut die Spielerliste für REST und WebSocket (nur aktive Tracker)."""
+    purge_stale_positions()
     result = []
 
     for entry in positions.values():
         if session_id and entry.get("session_id") != session_id:
             continue
-        age = now - entry["timestamp"]
-        if age >= STALE_PLAYER_SECONDS:
-            continue
 
         result.append({
             **entry,
-            "active": age < PLAYER_TIMEOUT_SECONDS,
+            "active": True,
             "last_seen": entry["timestamp"],
-            "offline_seconds": 0 if age < PLAYER_TIMEOUT_SECONDS else int(age),
+            "offline_seconds": 0,
         })
 
     return result
@@ -210,9 +226,18 @@ def broadcast_positions() -> None:
 
 
 def stale_broadcast_loop() -> None:
-    """Aktualisiert Offline-Status regelmäßig (z. B. „zuletzt gesehen“)."""
+    """Entfernt abgestürzte Spieler und aktualisiert Karte + Sessions."""
+    global _last_broadcast_payload
+
     while True:
         socketio.sleep(5)
+        removed = purge_stale_positions()
+        if removed:
+            _last_broadcast_payload = None
+            session_ids = {sid for _, sid in removed if sid}
+            for sid in session_ids:
+                _last_session_broadcast.pop(sid, None)
+                broadcast_session(sid)
         broadcast_positions()
 
 
@@ -410,6 +435,29 @@ def post_position():
         broadcast_session(session_id)
 
     broadcast_positions()
+    return jsonify({"ok": True})
+
+
+@app.delete("/api/position")
+def delete_position():
+    """Entfernt einen Spieler sofort von der Karte (Tracker-Shutdown / Spiel beendet)."""
+    global _last_broadcast_payload
+
+    data = request.get_json(force=True, silent=True) or {}
+    player = str(data.get("player", request.args.get("player", ""))).strip()
+    if not player or player not in positions:
+        return jsonify({"ok": True})
+
+    session_id = positions[player].get("session_id")
+    del positions[player]
+    SESSIONS.on_player_disconnect(player)
+
+    _last_broadcast_payload = None
+    broadcast_positions()
+    if session_id:
+        _last_session_broadcast.pop(session_id, None)
+        broadcast_session(session_id)
+
     return jsonify({"ok": True})
 
 
