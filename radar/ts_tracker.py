@@ -17,18 +17,7 @@ import time
 
 import requests
 
-from radar_config import load_config
-
-CONFIG = load_config()
-
-# ---------------------------------------------------------------------------
-# Konfiguration aus config.json (im radar-Ordner)
-# ---------------------------------------------------------------------------
-
-RAILDRIVER_DLL_PATH = CONFIG["raildriver_dll_path"]
-PLAYER_NAME = CONFIG["player_name"]
-POLL_INTERVAL_SECONDS = float(CONFIG["poll_interval_seconds"])
-SERVER_URL = CONFIG["server_url"]
+from radar_config import CONFIG_PATH, load_config
 
 # Virtuelle Controller-IDs laut offizieller External-Interface-API
 CONTROLLER_LATITUDE = 400   # Breitengrad
@@ -320,20 +309,17 @@ def read_gps_coordinates(dll: ctypes.CDLL) -> tuple[float, float]:
 
 def send_position_to_server(
     player_name: str,
+    server_url: str,
     lat: float,
     lon: float,
     speed_kph: float,
     heading: float,
-) -> None:
+) -> bool:
     """
     Sendet Position, Geschwindigkeit und Fahrtrichtung an den Radar-Server.
 
-    Args:
-        player_name: Anzeigename des Spielers auf der Karte.
-        lat: Breitengrad (Dezimalgrad).
-        lon: Längengrad (Dezimalgrad).
-        speed_kph: Geschwindigkeit in km/h.
-        heading: Fahrtrichtung in Grad (0–360).
+    Returns:
+        True wenn der Server die Daten angenommen hat.
     """
     print(
         f"[Radar] {player_name}: lat={lat:.6f}, lon={lon:.6f}, "
@@ -350,63 +336,99 @@ def send_position_to_server(
     }
 
     try:
-        response = requests.post(SERVER_URL, json=payload, timeout=5)
+        response = requests.post(server_url, json=payload, timeout=5)
         response.raise_for_status()
+        return True
     except requests.RequestException as error:
-        print(f"Fehler beim Senden an {SERVER_URL}: {error}", file=sys.stderr)
+        print(f"Fehler beim Senden an {server_url}: {error}", file=sys.stderr)
+        return False
 
 
 # ---------------------------------------------------------------------------
 # Hauptschleife
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    """Startet den Tracker und fragt GPS-Daten in einer Endlosschleife ab."""
-    print("=" * 60)
-    print("Train Simulator Classic – Multiplayer-Radar Tracker")
-    print("=" * 60)
-    print(f"Konfiguration: config.json")
-    print(f"DLL-Pfad:      {RAILDRIVER_DLL_PATH}")
-    print(f"Spieler:       {PLAYER_NAME}")
-    print(f"Server:        {SERVER_URL}")
-    print(f"Intervall:     {POLL_INTERVAL_SECONDS}s")
-    print()
-    print("Starte Train Simulator und beginne eine Fahrt, falls noch nicht geschehen.")
-    print("Beenden mit Strg+C.")
-    print()
 
-    dll = load_raildriver(RAILDRIVER_DLL_PATH)
+def run_tracker(status_callback=None, stop_event=None) -> None:
+    """
+    Startet den Tracker und fragt GPS-Daten in einer Endlosschleife ab.
+
+    Args:
+        status_callback: Optional (kind, message) für GUI-Updates
+        stop_event: threading.Event zum Beenden
+    """
+    config = load_config()
+    player_name = config["player_name"]
+    server_url = config["server_url"]
+    dll_path = config["raildriver_dll_path"]
+    poll_interval = float(config.get("poll_interval_seconds", 1.0))
+
+    def notify(kind: str, message: str) -> None:
+        if status_callback:
+            status_callback(kind, message)
+
+    def log(message: str) -> None:
+        print(message)
+        notify("log", message)
+    log("=" * 60)
+    log("Train Simulator Classic – Multiplayer-Radar Tracker")
+    log("=" * 60)
+    log(f"Konfiguration: {CONFIG_PATH.name}")
+    log(f"DLL-Pfad:      {dll_path}")
+    log(f"Spieler:       {player_name}")
+    log(f"Server:        {server_url}")
+    log(f"Intervall:     {poll_interval}s")
+    log("")
+    log("Starte Train Simulator und beginne eine Fahrt, falls noch nicht geschehen.")
+    log("")
+
+    dll = load_raildriver(dll_path)
     telemetry = LocoTelemetry()
 
-    # Erstverbindung herstellen
     establish_connection(dll)
     telemetry.refresh_for_loco(dll)
-    print("Verbindung zum Simulator hergestellt. Lese GPS-Daten …")
-    print()
+    log("Verbindung zum Simulator hergestellt. Lese GPS-Daten …")
+    notify("sim", "verbunden")
+    log("")
 
     try:
         while True:
-            # Verbindung in jeder Iteration aufrechterhalten (API-Anforderung)
-            maintain_connection(dll)
+            if stop_event and stop_event.is_set():
+                log("Tracker beendet.")
+                break
 
+            maintain_connection(dll)
             state = read_train_state(dll, telemetry)
 
-            # Nur senden, wenn sinnvolle Koordinaten vorliegen (0/0 = oft kein Signal)
             if state["lat"] != 0.0 or state["lon"] != 0.0:
-                send_position_to_server(
-                    PLAYER_NAME,
+                ok = send_position_to_server(
+                    player_name,
+                    server_url,
                     state["lat"],
                     state["lon"],
                     state["speed_kph"],
                     state["heading"],
                 )
+                notify(
+                    "gps",
+                    f"{state['speed_kph']:.0f} km/h · {state['heading']:.0f}°"
+                    + (" · gesendet" if ok else " · Server-Fehler"),
+                )
             else:
-                print("[Radar] Noch keine GPS-Daten – bist du in einer aktiven Fahrt?")
+                log("[Radar] Noch keine GPS-Daten – bist du in einer aktiven Fahrt?")
+                notify("gps", "warte auf Fahrt …")
 
-            time.sleep(POLL_INTERVAL_SECONDS)
+            if stop_event and stop_event.wait(poll_interval):
+                log("Tracker beendet.")
+                break
 
     except KeyboardInterrupt:
-        print("\nTracker beendet.")
+        log("Tracker beendet.")
+
+
+def main() -> None:
+    """Kommandozeilen-Start (ohne GUI)."""
+    run_tracker()
 
 
 if __name__ == "__main__":

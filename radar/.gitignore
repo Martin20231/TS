@@ -4,5 +4,10 @@ __pycache__/
 .venv/
 venv/
 
+# PyInstaller
+dist/
+build/
+*.spec
+
 # Persönliche lokale Einstellungen (Vorlage: config.example.json)
 config.json

@@ -94,7 +94,15 @@ Freunde: gleiche Karten-URL, eigener `player_name`, gleiche `server_url`.
 
 ---
 
-## Lokal testen (ohne Cloud)
+## Für Freunde: nur eine Exe
+
+1. Einmal `build_exe.bat` ausführen (oder fertige `dist/TS-Radar.exe` nutzen)
+2. An Freunde weitergeben: **`TS-Radar.exe`** (sonst nichts nötig)
+3. Freund: Doppelklick → Name + Server-URL + DLL-Pfad eintragen → fertig
+4. `config.json` liegt automatisch neben der Exe
+
+**Karte öffnen:** Button „Karte öffnen“ in der Exe oder Render-URL im Browser.
+
 
 ```powershell
 cd radar

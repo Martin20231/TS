@@ -20,7 +20,7 @@ from radar_config import CACHE_DIR, load_config
 CONFIG = load_config()
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
 
 SERVER_HOST = CONFIG["server_host"]
 SERVER_PORT = int(os.environ.get("PORT", CONFIG["server_port"]))
@@ -123,7 +123,15 @@ def ensure_background_tasks() -> None:
 
 @app.before_request
 def _start_background_on_first_request():
+    if request.path in ("/api/health", "/api/status"):
+        return
     ensure_background_tasks()
+
+
+@app.get("/api/health")
+def health_check():
+    """Schneller Health-Check für Render (ohne Hintergrund-Jobs)."""
+    return jsonify({"ok": True}), 200
 
 
 def get_local_ip() -> str:
@@ -672,3 +680,7 @@ if __name__ == "__main__":
         port=SERVER_PORT,
         allow_unsafe_werkzeug=True,
     )
+
+
+# Gunicorn auf Render (und andere PaaS)
+application = app

@@ -15,3 +15,8 @@ venv/
 [Bb]uilds/
 Logs/
 UserSettings/
+
+# PyInstaller (Radar-Exe)
+radar/dist/
+radar/build/
+radar/*.spec
