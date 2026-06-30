@@ -18,6 +18,7 @@ import time
 import requests
 
 from http_session import create_http_session
+from mp_bus import bind_set_controller_value, find_mp_bus_control, push_convoy_to_game
 from radar_config import CONFIG_PATH, load_config
 
 # Virtuelle Controller-IDs laut offizieller External-Interface-API
@@ -173,11 +174,15 @@ class LocoTelemetry:
         self.gps_speed_kph = 0.0
         self.gps_heading = 0.0
         self.loco_name = ""
+        self.loco_just_changed = False
 
     def refresh_for_loco(self, dll: ctypes.CDLL) -> None:
         """Sucht das Tachometer neu, wenn die Lok gewechselt wurde."""
         if not dll.GetRailSimLocoChanged() and self.speed_index is not None:
+            self.loco_just_changed = False
             return
+
+        self.loco_just_changed = True
 
         if getattr(dll, "_has_loco_name", False):
             try:
@@ -413,6 +418,12 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
     session_id = str(config.get("session_id", "") or "").strip()
     session_role = str(config.get("session_role", "driver") or "driver")
     dispatch_after_id = 0
+    mp_ingame_enabled = bool(config.get("mp_ingame_enabled", False))
+    mp_convoy_push_interval = float(config.get("mp_convoy_push_interval_seconds", 5.0))
+    mp_bus_index: int | None = None
+    mp_bus_name = ""
+    last_convoy_signature = ""
+    last_convoy_push_at = 0.0
     server_root = server_url.rsplit("/api/", 1)[0] if "/api/" in server_url else server_url.rstrip("/")
 
     def notify(kind: str, message: str) -> None:
@@ -432,15 +443,76 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
     log(f"Intervall:     {poll_interval}s")
     if session_id:
         log(f"Session:       {session_id} ({session_role})")
+    if mp_ingame_enabled:
+        log("In-Game:       Konvoi-Menue aktiv (ScenarioScript.lua + MPRadarStart)")
     log("")
     log("Starte Train Simulator und beginne eine Fahrt, falls noch nicht geschehen.")
     log("")
 
     dll = load_raildriver(dll_path)
     telemetry = LocoTelemetry()
+    if mp_ingame_enabled:
+        try:
+            bind_set_controller_value(dll)
+        except RuntimeError as error:
+            log(f"[Radar] In-Game-Konvoi deaktiviert: {error}")
+            mp_ingame_enabled = False
+
+    def refresh_mp_bus() -> None:
+        nonlocal mp_bus_index, mp_bus_name
+        if not mp_ingame_enabled:
+            return
+        controllers = get_controller_list(dll)
+        mp_bus_index, mp_bus_name = find_mp_bus_control(
+            lambda: controllers,
+            get_controller_index,
+            config,
+        )
+        if mp_bus_index is not None and mp_bus_name:
+            log(f"[Radar] MP-Bus: {mp_bus_name} (Index {mp_bus_index})")
+        else:
+            log("[Radar] MP-Bus: kein Regler gefunden – mp_bus_control in config.json setzen.")
+
+    def maybe_push_convoy_to_game() -> None:
+        nonlocal last_convoy_signature, last_convoy_push_at
+        if not mp_ingame_enabled or not session_id or mp_bus_index is None:
+            return
+        now = time.time()
+        if now - last_convoy_push_at < mp_convoy_push_interval:
+            return
+        try:
+            convoy_url = (
+                f"{server_root}/api/sessions/{session_id}/convoy"
+                f"?player={requests.utils.quote(player_name)}"
+            )
+            response = http.get(convoy_url, timeout=3)
+            if not response.ok:
+                return
+            convoy = response.json().get("convoy") or []
+            signature = "|".join(
+                f"{entry.get('player')}:{entry.get('distance_km')}"
+                for entry in convoy[:6]
+            )
+            if signature == last_convoy_signature:
+                last_convoy_push_at = now
+                return
+            push_convoy_to_game(dll, mp_bus_index, convoy)
+            last_convoy_signature = signature
+            last_convoy_push_at = now
+            if convoy:
+                nearest = convoy[0]
+                log(
+                    f"[Radar] Konvoi → Spiel: {nearest.get('player')} "
+                    f"{nearest.get('distance_km')} km (Menue: Entfernungen anzeigen)"
+                )
+            else:
+                log("[Radar] Konvoi → Spiel: keine anderen Zuege")
+        except (OSError, requests.RequestException, ValueError) as error:
+            log(f"[Radar] Konvoi → Spiel fehlgeschlagen: {error}")
 
     establish_connection(dll)
     telemetry.refresh_for_loco(dll)
+    refresh_mp_bus()
 
     log("Verbindung zum Simulator hergestellt. Lese GPS-Daten …")
     notify("sim", "verbunden")
@@ -476,6 +548,9 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
                 else:
                     time.sleep(poll_interval)
                 continue
+
+            if telemetry.loco_just_changed and mp_ingame_enabled:
+                refresh_mp_bus()
 
             valid_gps = state["lat"] != 0.0 or state["lon"] != 0.0
 
@@ -534,6 +609,8 @@ def run_tracker(status_callback=None, stop_event=None) -> None:
                             notify("dispatch", f"{label}: {text}")
                 except requests.RequestException:
                     pass
+
+                maybe_push_convoy_to_game()
 
             wait_seconds = poll_interval
             if server_fail_streak >= 3:
