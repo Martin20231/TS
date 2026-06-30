@@ -34,6 +34,9 @@ DEFAULT_CONFIG: dict = {
     "session_id": "",
     "session_role": "driver",
     "convoy_alert_km": 2.0,
+    "mp_ingame_enabled": False,
+    "mp_bus_control": "",
+    "mp_convoy_push_interval_seconds": 5.0,
 }
 
 

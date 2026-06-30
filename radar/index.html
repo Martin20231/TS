@@ -60,11 +60,27 @@
                 <button class="ctrl-btn active" id="btn-follow" type="button" title="Karte folgt deinem Zug">Kamera folgt</button>
                 <button class="ctrl-btn" id="btn-dark" type="button" title="Hell/Dunkel umschalten">Dark Mode</button>
                 <button class="ctrl-btn" id="btn-trail" type="button" title="Deine zurückgelegte Strecke">Route an</button>
+                <button class="ctrl-btn" id="btn-hud" type="button" title="Geschwindigkeit und Halte am Kartenrand">HUD aus</button>
             </div>
 
             <p class="status" id="train-status">Eigener Zug (<span id="cfg-player">…</span>): warte auf Daten …</p>
-            <p class="status" id="next-stop-status">Nächster Halt: –</p>
-            <div id="players-list"></div>
+
+            <details class="menu-box" id="mp-fahrt-box">
+                <summary>Fahrt & nächster Halt</summary>
+                <p class="status" id="next-stop-status">Nächster Halt: –</p>
+            </details>
+
+            <details class="menu-box" id="mp-convoy-box">
+                <summary>Konvoi & Entfernungen</summary>
+                <div id="mp-convoy-menu" class="mp-convoy"></div>
+                <div id="players-list"></div>
+            </details>
+
+            <details class="menu-box" id="mp-inbox-box">
+                <summary>Leitstand-Nachrichten</summary>
+                <div id="mp-inbox" class="mp-msg-list"></div>
+            </details>
+
             <p class="status" id="lines-status">Lade S-Bahn-Linien …</p>
             <p class="status" id="station-status">Lade S-Bahn-Stationen …</p>
 
@@ -336,6 +352,26 @@
             setTrailEnabled(!trailEnabled);
         });
 
+        let hudEnabled = localStorage.getItem("radar-hud") === "true";
+        const mapHud = document.getElementById("map-hud");
+
+        function setHudEnabled(enabled) {
+            hudEnabled = enabled;
+            localStorage.setItem("radar-hud", enabled ? "true" : "false");
+            if (mapHud) {
+                mapHud.classList.toggle("hidden", !enabled);
+            }
+            const btn = document.getElementById("btn-hud");
+            if (btn) {
+                btn.classList.toggle("active", enabled);
+                btn.textContent = enabled ? "HUD an" : "HUD aus";
+            }
+        }
+
+        document.getElementById("btn-hud")?.addEventListener("click", () => {
+            setHudEnabled(!hudEnabled);
+        });
+
         const infoPanel = document.getElementById("info-panel");
         const panelToggle = document.getElementById("btn-panel-toggle");
         if (panelToggle && infoPanel) {
@@ -353,6 +389,7 @@
         setDarkMode(isDarkMode);
         setFollowSelf(followSelfEnabled);
         setTrailEnabled(trailEnabled);
+        setHudEnabled(hudEnabled);
 
         // ===================================================================
         // Zug-Marker vorbereiten
