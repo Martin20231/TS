@@ -9,5 +9,6 @@
   "route_trail_minutes": 30,
   "session_id": "",
   "session_role": "driver",
-  "convoy_alert_km": 2.0
+  "convoy_alert_km": 2.0,
+  "scenario_path": "C:\\Users\\DEINNAME\\Documents\\My Games\\Train Simulator\\Content\\Routes\\...\\DeinSzenario"
 }

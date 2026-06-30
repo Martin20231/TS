@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<title>Radar Overlay</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: rgba(10, 16, 28, 0.88);
+  color: #eee;
+  padding: 16px 20px;
+  min-width: 280px;
+}
+h1 { font-size: 15px; color: #4fc3f7; margin-bottom: 10px; }
+.row { font-size: 22px; font-weight: 600; margin: 4px 0; }
+.sub { font-size: 13px; color: #aaa; margin-top: 8px; }
+.near { color: #ff6666; }
+.ok { color: #99ff99; }
+</style>
+</head>
+<body>
+<h1>Multiplayer-Radar</h1>
+<div id="status" class="sub">Verbinde …</div>
+<div id="player" class="row">–</div>
+<div id="detail" class="sub">–</div>
+<script>
+const params = new URLSearchParams(location.search);
+const session = params.get("session") || "";
+const player = params.get("player") || "";
+const root = location.origin;
+const api = root + "/api/positions";
+
+function bearing(lat1, lon1, lat2, lon2) {
+  const phi1 = lat1 * Math.PI / 180, phi2 = lat2 * Math.PI / 180;
+  const dL = (lon2 - lon1) * Math.PI / 180;
+  const y = Math.sin(dL) * Math.cos(phi2);
+  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dL);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function distKm(a, b) {
+  const R = 6371;
+  const dPhi = (b.lat - a.lat) * Math.PI / 180;
+  const dL = (b.lon - a.lon) * Math.PI / 180;
+  const s = Math.sin(dPhi/2)**2 + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dL/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+}
+
+function fmtKm(km) {
+  return km < 1 ? Math.round(km * 1000) + " m" : km.toFixed(1) + " km";
+}
+
+async function tick() {
+  const status = document.getElementById("status");
+  const playerEl = document.getElementById("player");
+  const detail = document.getElementById("detail");
+  try {
+    const res = await fetch(api);
+    const list = await res.json();
+    const self = list.find(p => p.player === player);
+    const others = list.filter(p => p.player !== player && p.active !== false);
+    if (!self) {
+      status.textContent = "Eigener Tracker sendet nicht";
+      playerEl.textContent = "–";
+      detail.textContent = "TS-Radar.exe starten";
+      return;
+    }
+    if (!others.length) {
+      status.textContent = "Kein anderer Spieler online";
+      playerEl.textContent = "–";
+      detail.textContent = "";
+      return;
+    }
+    let best = others[0], bestD = Infinity;
+    for (const o of others) {
+      const d = distKm(self, o);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    const brg = bearing(self.lat, self.lon, best.lat, best.lon);
+    status.textContent = "Live";
+    status.className = bestD < 2 ? "sub near" : "sub ok";
+    playerEl.textContent = best.player;
+    playerEl.className = bestD < 2 ? "row near" : "row";
+    detail.textContent = fmtKm(bestD) + " · Richtung " + Math.round(brg) + "° · " + Math.round(best.speed_kph || 0) + " km/h";
+  } catch (e) {
+    status.textContent = "Server nicht erreichbar";
+  }
+}
+
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>

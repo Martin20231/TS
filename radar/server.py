@@ -28,6 +28,7 @@ from mp_geo import (
     nearest_station,
 )
 from mp_session import SessionStore
+from mp_radio import register_radio_routes, register_radio_socketio
 
 CONFIG = load_config()
 SESSIONS = SessionStore()
@@ -395,6 +396,10 @@ def overlay_page():
 @app.route("/static/<path:filename>")
 def static_files(filename: str):
     return send_from_directory(STATIC_DIR, filename)
+
+
+register_radio_routes(app, STATIC_DIR, socketio)
+register_radio_socketio(socketio)
 
 
 @app.post("/api/position")
@@ -973,6 +978,7 @@ if __name__ == "__main__":
     print("WebSocket:   aktiv (Live-Updates)")
     print(f"Spielername: {CONFIG['player_name']}  (in config.json ändern)")
     print(f"Overlay:     http://{local_ip}:{SERVER_PORT}/overlay")
+    print(f"Funk:        http://{local_ip}:{SERVER_PORT}/radio?player=NAME&session=ID")
     print("=" * 55)
 
     socketio.start_background_task(stale_broadcast_loop)

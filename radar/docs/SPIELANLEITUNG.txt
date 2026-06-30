@@ -1,0 +1,59 @@
+TS Multiplayer-Radar – Spielanleitung
+=====================================
+
+Alles in EINEM Fenster: TS-Radar.exe (oder TS-Radar Starten.bat)
+
+
+Schnellstart
+------------
+
+1. Doppelklick auf  dist\TS-Radar.exe
+   (oder  TS-Radar Starten.bat  im radar-Ordner)
+
+2. Beim ersten Mal: Einrichtung ausfüllen
+   - Name, Cloud-Server, Session-Code, RailDriver-DLL
+
+3. Train Simulator starten → Fahrt beginnen
+   → Launcher offen lassen
+
+
+Im Launcher (alles an einem Ort)
+--------------------------------
+
+  1 → TS starten     2 → Radar läuft (auto)     3 → Buttons nutzen
+
+  🗺 Live-Karte        Freunde & Konvoi auf der Karte
+  📡 Cab-Overlay       Abstand zum anderen Zug im Führerstand
+  🎙 Funk              Sprechen mit Freunden (Taste V)
+  📯 Funk per Hupe     Hupe drücken = senden
+
+  ⚙ Einstellungen (oben rechts)
+  ? Hilfe (oben rechts)
+
+Extras (aufklappbar): Ghost-Experiment, Browser-Overlay
+
+
+Funk mit Freunden
+-----------------
+
+1. Beide: gleiche Session-ID in den Einstellungen
+2. Beide: „Funk öffnen“ → Mikrofon erlauben
+3. Sprechen: Taste V halten ODER Funk-PTT (Hupe) starten und Hupe drücken
+
+
+Cloud-Karte (ohne eigenen Server)
+---------------------------------
+
+https://ts-multiplayer-radar.onrender.com
+
+Session erstellen → Code an Freunde → alle tragen Code ein.
+
+
+Probleme?
+---------
+
+Einstellungen → prüfen → Speichern & Starten
+Hilfe-Button im Launcher → diese Datei
+
+DLL nicht gefunden → Pfad zu RailWorks\plugins\RailDriver64.dll
+Kein GPS → In TS Fahrt starten und in der Lok sitzen

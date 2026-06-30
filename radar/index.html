@@ -111,6 +111,7 @@
 
     <div id="map-legend" aria-hidden="true">
         <div class="legend-item"><span class="legend-swatch" style="background:#38bdf8"></span> Dein Zug</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#ff4757"></span> Andere Züge</div>
         <div class="legend-item"><span class="legend-swatch" style="background:#4ade80"></span> S-Bahn-Halt</div>
         <div class="legend-item"><span class="legend-swatch" style="background:#fbbf24"></span> Nächster Halt</div>
         <div class="legend-item"><span class="legend-swatch" style="background:#a855f7"></span> S-Bahn-Linien</div>
@@ -131,10 +132,10 @@
         let linesLayerReady = false;
         let trailEnabled = localStorage.getItem("radar-trail") !== "false";
 
-        // Farben für andere Spieler (eigener Zug ist immer blau)
+        // Kräftige Farben für andere Spieler (gut sichtbar auf dunkler Karte)
         const OTHER_PLAYER_COLORS = [
-            "#dc2626", "#ea580c", "#ca8a04", "#7c3aed",
-            "#db2777", "#0891b2", "#4f46e5", "#16a34a",
+            "#ff4757", "#ff7f00", "#ffd000", "#b44aff",
+            "#ff3d9a", "#00d9ff", "#6c7bff", "#2ed573",
         ];
         const SELF_COLOR = "#38bdf8";
 
@@ -365,17 +366,20 @@
          * @returns {L.DivIcon} Leaflet-Icon
          */
         function createTrainIcon(color, heading = 0, dimmed = false, isSelf = false) {
-            const classes = `train-marker${dimmed ? " dimmed" : ""}${isSelf ? " is-self" : ""}`;
+            const roleClass = isSelf ? " is-self" : " is-other";
+            const classes = `train-marker${dimmed ? " dimmed" : ""}${roleClass}`;
+            const size = isSelf ? 36 : 44;
+            const anchor = size / 2;
             return L.divIcon({
                 className: "",
                 html: `<div class="${classes}" style="--marker-color: ${color}; transform: rotate(${heading}deg);">
                     <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M16 4 L26 26 L16 22 L6 26 Z" fill="${color}" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
-                        <circle cx="16" cy="14" r="3.5" fill="white" opacity="0.9"/>
+                        <path d="M16 3 L27 27 L16 22 L5 27 Z" fill="${color}" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>
+                        <circle cx="16" cy="13" r="4" fill="white" opacity="0.95"/>
                     </svg>
                 </div>`,
-                iconSize: [32, 32],
-                iconAnchor: [16, 16],
+                iconSize: [size, size],
+                iconAnchor: [anchor, anchor],
             });
         }
 
@@ -650,7 +654,7 @@
 
             train.marker = L.marker(
                 [train.currentLat, train.currentLon],
-                { icon: createTrainIcon(train.color, 0, false, train.isSelf), title: playerName, zIndexOffset: train.isSelf ? 200 : 100 }
+                { icon: createTrainIcon(train.color, 0, false, train.isSelf), title: playerName, zIndexOffset: train.isSelf ? 200 : 180 }
             )
                 .addTo(map)
                 .bindPopup(buildTrainPopup(playerName, 0, 0));

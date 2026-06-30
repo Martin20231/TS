@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TS Funk</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #0a101c;
+  color: #eee;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+h1 { font-size: 16px; color: #4fc3f7; margin-bottom: 6px; }
+.sub { font-size: 12px; color: #888; margin-bottom: 20px; text-align: center; }
+#ptt {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 3px solid #334155;
+  background: #1e293b;
+  color: #94a3b8;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  transition: 0.12s;
+}
+#ptt:hover { border-color: #4fc3f7; }
+#ptt.active {
+  background: #166534;
+  border-color: #4ade80;
+  color: #fff;
+  box-shadow: 0 0 24px rgba(74, 222, 128, 0.45);
+}
+#status { margin-top: 16px; font-size: 13px; color: #aaa; min-height: 20px; }
+#peers { margin-top: 12px; font-size: 12px; color: #666; text-align: center; }
+.talking { color: #4ade80; font-weight: 600; }
+.err { color: #f87171; }
+</style>
+</head>
+<body>
+<h1>🎙 Zugfunk</h1>
+<p class="sub" id="meta">Verbinde …</p>
+<button type="button" id="ptt" aria-label="Push to talk">FUNK</button>
+<p id="status">Mikrofon wird angefragt …</p>
+<p id="peers"></p>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const params = new URLSearchParams(location.search);
+const player = params.get("player") || "MeinZug";
+const sessionId = params.get("session") || "";
+
+const pttBtn = document.getElementById("ptt");
+const statusEl = document.getElementById("status");
+const peersEl = document.getElementById("peers");
+const metaEl = document.getElementById("meta");
+
+const peers = new Map();
+let localStream = null;
+let transmitting = false;
+let manualHold = false;
+let socket = null;
+
+const ICE = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+function setStatus(text, isErr = false) {
+  statusEl.textContent = text;
+  statusEl.className = isErr ? "err" : "";
+}
+
+function setTransmit(on) {
+  if (!localStream || transmitting === on) return;
+  transmitting = on;
+  localStream.getAudioTracks().forEach((t) => { t.enabled = on; });
+  pttBtn.classList.toggle("active", on);
+  pttBtn.textContent = on ? "SENDE" : "FUNK";
+  if (sessionId) {
+    fetch("/api/radio/ptt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ player, session_id: sessionId, active: on }),
+    }).catch(() => {});
+  }
+}
+
+function renderPeers() {
+  const names = [...peers.keys()];
+  peersEl.textContent = names.length
+    ? "Im Funk: " + names.join(", ")
+    : "Warte auf andere im Funk …";
+}
+
+async function ensureMic() {
+  if (localStream) return localStream;
+  localStream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true },
+    video: false,
+  });
+  localStream.getAudioTracks().forEach((t) => { t.enabled = false; });
+  return localStream;
+}
+
+async function createPeer(remoteName, isOfferer) {
+  if (peers.has(remoteName)) return;
+  const pc = new RTCPeerConnection(ICE);
+  const audio = document.createElement("audio");
+  audio.autoplay = true;
+  document.body.appendChild(audio);
+
+  peers.set(remoteName, { pc, audio });
+
+  const stream = await ensureMic();
+  stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+  pc.ontrack = (ev) => {
+    audio.srcObject = ev.streams[0];
+  };
+
+  pc.onicecandidate = (ev) => {
+    if (!ev.candidate || !socket) return;
+    socket.emit("radio_signal", {
+      session_id: sessionId,
+      target: remoteName,
+      from: player,
+      type: "ice",
+      candidate: ev.candidate,
+    });
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+      pc.close();
+      peers.delete(remoteName);
+      renderPeers();
+    }
+  };
+
+  if (isOfferer) {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit("radio_signal", {
+      session_id: sessionId,
+      target: remoteName,
+      from: player,
+      type: "offer",
+      sdp: pc.localDescription,
+    });
+  }
+}
+
+async function handleSignal(data) {
+  const from = data.from;
+  if (!from || from === player) return;
+
+  let entry = peers.get(from);
+  if (!entry) {
+    await createPeer(from, false);
+    entry = peers.get(from);
+  }
+  const { pc } = entry;
+
+  if (data.type === "offer") {
+    await pc.setRemoteDescription(data.sdp);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    socket.emit("radio_signal", {
+      session_id: sessionId,
+      target: from,
+      from: player,
+      type: "answer",
+      sdp: pc.localDescription,
+    });
+  } else if (data.type === "answer") {
+    await pc.setRemoteDescription(data.sdp);
+  } else if (data.type === "ice" && data.candidate) {
+    try {
+      await pc.addIceCandidate(data.candidate);
+    } catch (_) { /* ignore */ }
+  }
+}
+
+async function init() {
+  if (!sessionId) {
+    setStatus("Keine Session – in config.json session_id setzen", true);
+    return;
+  }
+
+  metaEl.textContent = `${player} · Session ${sessionId}`;
+
+  try {
+    await ensureMic();
+    setStatus("Mikro bereit · Taste V oder Maustaste halten");
+  } catch (_) {
+    setStatus("Mikrofon-Zugriff verweigert", true);
+    return;
+  }
+
+  socket = io();
+  socket.emit("radio_join", { session_id: sessionId, player });
+
+  socket.on("radio_peers", async (data) => {
+    for (const name of data.peers || []) {
+      await createPeer(name, true);
+    }
+    renderPeers();
+  });
+
+  socket.on("radio_peer_joined", async (data) => {
+    if (data.player && data.player !== player) {
+      await createPeer(data.player, true);
+      renderPeers();
+    }
+  });
+
+  socket.on("radio_peer_left", (data) => {
+    const entry = peers.get(data.player);
+    if (entry) {
+      entry.pc.close();
+      peers.delete(data.player);
+      renderPeers();
+    }
+  });
+
+  socket.on("radio_signal", handleSignal);
+
+  socket.on("radio_ptt", (data) => {
+    if (data.player === player) return;
+    if (data.active) {
+      peersEl.innerHTML = `<span class="talking">${data.player} spricht …</span>`;
+    } else {
+      renderPeers();
+    }
+  });
+
+  setInterval(async () => {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(
+        `/api/radio/ptt?player=${encodeURIComponent(player)}&session_id=${encodeURIComponent(sessionId)}`
+      );
+      const data = await res.json();
+      if (data.active && !transmitting) setTransmit(true);
+      if (!data.active && transmitting && !manualHold) setTransmit(false);
+    } catch (_) { /* ignore */ }
+  }, 80);
+}
+
+pttBtn.addEventListener("mousedown", (e) => { e.preventDefault(); manualHold = true; setTransmit(true); });
+pttBtn.addEventListener("mouseup", () => { manualHold = false; setTransmit(false); });
+pttBtn.addEventListener("mouseleave", () => { if (manualHold) { manualHold = false; setTransmit(false); } });
+
+window.addEventListener("keydown", (e) => {
+  if (e.code === "KeyV" && !e.repeat) { manualHold = true; setTransmit(true); }
+});
+window.addEventListener("keyup", (e) => {
+  if (e.code === "KeyV") { manualHold = false; setTransmit(false); }
+});
+
+init();
+</script>
+</body>
+</html>

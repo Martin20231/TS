@@ -1,6 +1,4 @@
-# Radar-Server (lokal + Render)
-requests>=2.31.0,<3
-flask>=3.0.0,<4
-flask-socketio>=5.3.0,<6
+# Radar-Server (Render / Linux-Produktion)
+-r requirements-local.txt
 gunicorn==23.0.0
 gevent==24.2.1

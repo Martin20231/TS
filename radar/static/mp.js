@@ -16,6 +16,54 @@
         return document.getElementById(id);
     }
 
+    /** Session-Code aus Eingabe oder Einladungslink extrahieren. */
+    function parseSessionCode(raw) {
+        const input = (raw || "").trim();
+        if (!input) return "";
+
+        try {
+            if (/^https?:\/\//i.test(input)) {
+                const url = new URL(input);
+                const fromQuery = url.searchParams.get("session");
+                if (fromQuery) return fromQuery.trim();
+            }
+        } catch {
+            /* kein gültiger URL-String */
+        }
+
+        const queryMatch = input.match(/[?&]session=([^&#\s]+)/i);
+        if (queryMatch) {
+            try {
+                return decodeURIComponent(queryMatch[1]).trim();
+            } catch {
+                return queryMatch[1].trim();
+            }
+        }
+
+        return input.split(/\s/)[0].trim();
+    }
+
+    async function readJsonResponse(res) {
+        const contentType = res.headers.get("content-type") || "";
+        const text = await res.text();
+
+        if (!contentType.includes("application/json")) {
+            const lower = text.trim().toLowerCase();
+            if (lower.startsWith("<!doctype") || lower.startsWith("<html")) {
+                throw new Error(
+                    "Server antwortet mit HTML – Radar neu starten (start_radar.bat) oder nur den Session-Code einfügen, nicht die ganze URL."
+                );
+            }
+            throw new Error(text.slice(0, 100) || `HTTP ${res.status}`);
+        }
+
+        try {
+            return JSON.parse(text);
+        } catch {
+            throw new Error("Ungültige Server-Antwort");
+        }
+    }
+
     function loadStoredSession() {
         try {
             return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
@@ -68,8 +116,8 @@
                 </label>
                 <button type="button" class="ctrl-btn" id="mp-btn-create">Session erstellen</button>
                 <hr class="mp-hr" />
-                <label class="mp-field">Session-Code
-                    <input type="text" id="mp-session-code" placeholder="z.B. aus Einladungslink" />
+                <label class="mp-field">Session-Code oder Einladungslink
+                    <input type="text" id="mp-session-code" placeholder="Code z.B. xYz12a – oder ganzen Link einfügen" />
                 </label>
                 <label class="mp-field">Rolle
                     <select id="mp-join-role">
@@ -199,7 +247,7 @@
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name }),
             });
-            const data = await res.json();
+            const data = await readJsonResponse(res);
             if (!data.ok) throw new Error(data.error || "Fehler");
             await joinSession(data.session_id, sessionRole);
             showToast(`Session „${name}" erstellt`);
@@ -216,7 +264,7 @@
     }
 
     async function joinSession(sessionId, role) {
-        const id = (sessionId || "").trim();
+        const id = parseSessionCode(sessionId);
         if (!id) {
             showToast("Session-Code fehlt");
             return;
@@ -232,7 +280,7 @@
                     role: joinRole,
                 }),
             });
-            const data = await res.json();
+            const data = await readJsonResponse(res);
             if (!data.ok) throw new Error(data.error || "Session nicht gefunden");
             saveSession(id, joinRole);
             sessionData = data;

@@ -377,13 +377,21 @@ body.light-mode .station-label {
 /* Zug-Marker */
 .train-marker {
     position: relative;
-    width: 32px;
-    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
     transform-origin: center center;
     will-change: transform;
+}
+
+.train-marker.is-self {
+    width: 36px;
+    height: 36px;
+}
+
+.train-marker.is-other {
+    width: 44px;
+    height: 44px;
 }
 
 .train-marker.is-self::before {
@@ -396,21 +404,58 @@ body.light-mode .station-label {
     animation: pulse-ring 2s ease-out infinite;
 }
 
+.train-marker.is-other::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+    border-radius: 50%;
+    border: 3px solid var(--marker-color);
+    opacity: 0.85;
+    box-shadow:
+        0 0 16px 4px var(--marker-color),
+        0 0 28px 8px rgba(0, 0, 0, 0.35);
+}
+
+.train-marker.is-other::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    background: var(--marker-color);
+    opacity: 0.22;
+    filter: blur(4px);
+}
+
 @keyframes pulse-ring {
     0% { transform: scale(0.85); opacity: 0.7; }
     70% { transform: scale(1.15); opacity: 0; }
     100% { transform: scale(1.15); opacity: 0; }
 }
 
-.train-marker svg {
-    width: 28px;
-    height: 28px;
+.train-marker.is-self svg {
+    width: 30px;
+    height: 30px;
     filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
+}
+
+.train-marker.is-other svg {
+    width: 38px;
+    height: 38px;
+    filter:
+        drop-shadow(0 0 10px var(--marker-color))
+        drop-shadow(0 0 4px rgba(255, 255, 255, 0.6))
+        drop-shadow(0 3px 8px rgba(0, 0, 0, 0.75));
 }
 
 .train-marker.dimmed {
     opacity: 0.45;
     filter: grayscale(0.7);
+}
+
+.train-marker.dimmed.is-other::before,
+.train-marker.dimmed.is-other::after {
+    opacity: 0.2;
+    box-shadow: none;
 }
 
 .leaflet-popup-content-wrapper {

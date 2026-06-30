@@ -34,6 +34,8 @@ DEFAULT_CONFIG: dict = {
     "session_id": "",
     "session_role": "driver",
     "convoy_alert_km": 2.0,
+    "scenario_path": "",
+    "radio_poll_seconds": 0.05,
 }
 
 
