@@ -8,7 +8,6 @@
     const STORAGE_KEY = "ts-mp-session";
     const ghostLayers = new Map();
     let convoyAlertKm = 2.0;
-    let lastConvoyAlert = "";
     let sessionRole = "driver";
     let sessionData = null;
 
@@ -45,6 +44,73 @@
             panel.classList.toggle("hidden", panel.dataset.tab !== name);
         });
         localStorage.setItem("ts-mp-tab", name);
+    }
+
+    function renderConvoyHtml(convoy) {
+        if (!convoy.length) {
+            return "<p class='status'>Keine anderen Züge in der Nähe.</p>";
+        }
+        return convoy.map((c) => {
+            const dir = c.same_direction ? "gleiche Richtung" : "andere Richtung";
+            const alert = c.distance_km <= convoyAlertKm ? " mp-convoy-near" : "";
+            return `<div class="mp-convoy-row${alert}">
+                <strong>${c.player}</strong> · ${formatDist(c.distance_km)}
+                · ${Math.round(c.speed_kph)} km/h · ${dir}
+                ${c.loco ? ` · ${c.loco}` : ""}
+            </div>`;
+        }).join("");
+    }
+
+    function updateConvoyDisplays(convoy) {
+        const html = renderConvoyHtml(convoy);
+        for (const id of ["mp-convoy", "mp-convoy-menu"]) {
+            const el = $(id);
+            if (el) el.innerHTML = html;
+        }
+
+        const status = $("mp-convoy-status");
+        if (status) {
+            const nearest = convoy[0];
+            if (nearest) {
+                const near = nearest.distance_km <= convoyAlertKm ? " ⚠" : "";
+                status.textContent = `Nächster Zug: ${nearest.player} · ${formatDist(nearest.distance_km)}${near}`;
+            } else if (sessionData?.members) {
+                const others = sessionData.members.filter((m) => m.player !== playerName() && m.active);
+                status.textContent = others.length
+                    ? `${others.length} Zug/Züge in Session aktiv`
+                    : "Warte auf andere Spieler …";
+            } else {
+                status.textContent = "";
+            }
+        }
+    }
+
+    function appendInboxMessage(msg) {
+        const box = $("mp-inbox");
+        if (!box) return;
+        const target = msg.target ? ` → ${msg.target}` : " (alle)";
+        const row = document.createElement("div");
+        row.className = "mp-msg";
+        row.textContent = `${msg.sender}${target}: ${msg.text}`;
+        box.appendChild(row);
+        while (box.children.length > 20) {
+            box.removeChild(box.firstChild);
+        }
+        const inboxBox = $("mp-inbox-box");
+        if (inboxBox && !inboxBox.open) {
+            inboxBox.open = true;
+        }
+    }
+
+    function renderInboxFromSession() {
+        const box = $("mp-inbox");
+        if (!box) return;
+        const messages = sessionData?.messages || [];
+        const relevant = messages.filter((msg) => !msg.target || msg.target === playerName());
+        box.innerHTML = relevant.slice(-12).map((msg) => {
+            const target = msg.target ? ` → ${msg.target}` : " (alle)";
+            return `<div class="mp-msg"><strong>${msg.sender}</strong>${target}: ${msg.text}</div>`;
+        }).join("") || "<p class='status'>Noch keine Nachrichten</p>";
     }
 
     function showToast(text) {
@@ -239,6 +305,7 @@
             subscribeSession();
             renderLobby();
             renderDispatch();
+            renderInboxFromSession();
             showToast(`Session ${id} beigetreten`);
             const status = $("mp-session-status");
             if (status) {
@@ -337,55 +404,30 @@
     }
 
     async function updateConvoyPanel() {
-        const el = $("mp-convoy");
-        if (!el || !window.MP_SESSION_ID) return;
+        if (!window.MP_SESSION_ID) {
+            updateConvoyDisplays([]);
+            return;
+        }
         try {
             const res = await fetch(
                 `/api/sessions/${encodeURIComponent(window.MP_SESSION_ID)}/convoy?player=${encodeURIComponent(playerName())}`
             );
             const data = await res.json();
-            const convoy = data.convoy || [];
-            if (!convoy.length) {
-                el.innerHTML = "<p class='status'>Keine anderen Züge in der Nähe.</p>";
-                return;
-            }
-            el.innerHTML = convoy.map((c) => {
-                const dir = c.same_direction ? "gleiche Richtung" : "andere Richtung";
-                return `<div class="mp-convoy-row">
-                    <strong>${c.player}</strong> · ${formatDist(c.distance_km)}
-                    · ${Math.round(c.speed_kph)} km/h · ${dir}
-                    ${c.loco ? ` · ${c.loco}` : ""}
-                </div>`;
-            }).join("");
-
-            const nearest = convoy[0];
-            if (nearest && nearest.distance_km <= convoyAlertKm) {
-                const key = `${nearest.player}:${Math.round(nearest.distance_km * 10)}`;
-                if (key !== lastConvoyAlert) {
-                    lastConvoyAlert = key;
-                    showToast(`Konvoi: ${nearest.player} nur ${formatDist(nearest.distance_km)} entfernt`);
-                }
-            }
+            updateConvoyDisplays(data.convoy || []);
         } catch {
-            el.innerHTML = "";
+            updateConvoyDisplays([]);
         }
     }
 
     function onSessionUpdate(data) {
         sessionData = data;
         updateGhostTrails(data.trails);
+        renderInboxFromSession();
         renderLobby();
         if (document.querySelector('.mp-tab.active')?.dataset.tab === "dispatch") {
             renderDispatch();
         } else {
             updateConvoyPanel();
-        }
-        const convoyStatus = $("mp-convoy-status");
-        if (convoyStatus && data.members) {
-            const others = data.members.filter((m) => m.player !== playerName() && m.active);
-            convoyStatus.textContent = others.length
-                ? `${others.length} Zug/Züge in Session aktiv`
-                : "Warte auf andere Spieler …";
         }
     }
 
@@ -398,7 +440,7 @@
         window.socket.on("dispatch_message", (msg) => {
             if (msg.session_id !== window.MP_SESSION_ID) return;
             if (msg.target && msg.target !== playerName()) return;
-            showToast(`Leitstand ${msg.sender}: ${msg.text}`);
+            appendInboxMessage(msg);
         });
         subscribeSession();
     }
