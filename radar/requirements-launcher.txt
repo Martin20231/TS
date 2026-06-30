@@ -1,0 +1,4 @@
+# Nur für TS-Radar.exe (PyInstaller)
+-r requirements-local.txt
+customtkinter>=5.2.0,<6
+pillow>=10.0.0,<12

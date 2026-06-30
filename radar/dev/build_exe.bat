@@ -11,7 +11,7 @@ taskkill /IM TS-Radar.exe /F >nul 2>&1
 taskkill /IM python.exe /FI "WINDOWTITLE eq TS Radar*" /F >nul 2>&1
 timeout /t 2 /nobreak >nul
 
-python -m pip install pyinstaller customtkinter requests pillow -q
+python -m pip install pyinstaller customtkinter requests pillow -q -r requirements-launcher.txt
 if errorlevel 1 (
     echo FEHLER: pip install fehlgeschlagen.
     pause

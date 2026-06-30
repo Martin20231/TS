@@ -1,8 +1,4 @@
-# Launcher (Exe-Build)
-customtkinter>=5.2.0,<6
-pillow>=10.0.0,<12
-
-# Lokal unter Windows (ohne gevent/gunicorn – Python 3.13-kompatibel)
+# Lokal + Render (ohne gevent/gunicorn – Python 3.13-kompatibel)
 requests>=2.31.0,<3
 flask>=3.0.0,<4
 flask-socketio>=5.3.0,<6
